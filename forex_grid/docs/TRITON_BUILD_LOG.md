@@ -1,20 +1,20 @@
-# Seraphim EA — Build Log & Decision Record
+# Triton EA — Build Log & Decision Record
 
-**File:** `EA/Seraphim.mq5`  
+**File:** `EA/Triton.mq5`  
 **Built:** 2026-05-24  
 **Version:** 1.0  
 
 ---
 
-## Why "Seraphim"?
+## Why "Triton"?
 
-Replaces ArchangelX. Seraphim = highest order in the angelic hierarchy, above archangels. Keeps the angel-family brand while signalling this is a rebuild, not a patch.
+Replaces ArchangelX. Triton = Greek sea god, son of Poseidon. Signals power and depth — a complete rebuild, not a patch.
 
 ---
 
 ## What This EA Does (Plain English)
 
-Seraphim is a **grid sequencing EA**. It works like this:
+Triton is a **grid sequencing EA**. It works like this:
 
 1. When entry conditions align (regime filters pass), it opens a first trade.
 2. If price moves against that trade by a set distance (PipStep), it opens another trade in the same direction — this is "averaging down."
@@ -157,7 +157,7 @@ EQUITY_RISKED_PERCENT = 1  // Risked Percentage
 **Screenshots show:** `false`  
 **Previous skeleton:** `true`
 
-**What this means:** If another EA on the same account already has BUY positions on XAUUSD, Seraphim won't open another BUY sequence on XAUUSD.
+**What this means:** If another EA on the same account already has BUY positions on XAUUSD, Triton won't open another BUY sequence on XAUUSD.
 
 **Why the default is false:** Prevents stacking same-direction exposure across multiple EA instances on the same instrument. On a prop firm account running 3-5 simultaneous strategies, having multiple BUY sequences on the same pair multiplies both the upside and the drawdown — the latter being what kills prop accounts.
 
@@ -205,7 +205,7 @@ The genetic optimizer will find parameters that survive these constraints, not j
 
 | File | Action |
 |------|--------|
-| `EA/Seraphim.mq5` | Created — full EA |
+| `EA/Triton.mq5` | Created — full EA |
 
 ---
 
@@ -215,9 +215,9 @@ The genetic optimizer will find parameters that survive these constraints, not j
 - [ ] Open Strategy Tester → confirm all parameters appear correctly in Inputs tab
 - [ ] Confirm defaults match: PipStep=15.0, LotSize=0.1, MaxOrders=10, LockProfit=30.0
 - [ ] Run single backtest: XAUUSD M30, 2025-01-01 to 2025-05-01, deposit $100,000
-- [ ] Check Journal tab: "Seraphim v1.0 initialized" log line appears
+- [ ] Check Journal tab: "Triton v1.0 initialized" log line appears
 - [ ] Check Journal tab: OnTester metrics print at end of backtest
-- [ ] Copy `Seraphim.mq5` to VPS MetaTrader `MQL5/Experts/` folder
+- [ ] Copy `Triton.mq5` to VPS MetaTrader `MQL5/Experts/` folder
 - [ ] Compile on VPS → 0 errors, 0 warnings
-- [ ] Update `archangel_infra/remote_runner.py` → change `EA_NAME = "Seraphim"`
+- [ ] Update `archangel_infra/remote_runner.py` → change `EA_NAME = "Triton"`
 - [ ] Run one validation backtest via remote_runner queue on VPS

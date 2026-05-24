@@ -8,7 +8,7 @@
 
 | File | Change |
 |------|--------|
-| `archangel_infra/remote_runner.py` | EA_NAME updated to Seraphim; RegimeScore added |
+| `archangel_infra/remote_runner.py` | EA_NAME updated to Triton; RegimeScore added |
 | `archangel_infra/strategy_registry.py` | Created — strategy management CLI |
 | `requirements.txt` | Created — Python dependencies |
 | `README.md` | Created — project documentation |
@@ -23,14 +23,14 @@
 EA_NAME = r"Advisors\Archangel_X-v3.4.ex5"
 
 # After
-EA_NAME = r"Advisors\Seraphim.ex5"
+EA_NAME = r"Advisors\Triton_v1.0.ex5"
 ```
 
-**Why:** The compiled EA file on the VPS must be named `Seraphim.ex5` to match the new EA file (`EA/Seraphim.mq5`). After you compile Seraphim in MetaEditor and copy the `.ex5` to the VPS, remote_runner will automatically use it for all queued backtests.
+**Why:** The compiled EA file on the VPS must be named `Triton_v1.0.ex5` to match the new EA file (`EA/Triton.mq5`). After you compile Triton in MetaEditor and copy the `.ex5` to the VPS, remote_runner will automatically use it for all queued backtests.
 
 **What you need to do:**
-1. Compile `EA/Seraphim.mq5` on your local MetaEditor
-2. Copy `Seraphim.ex5` from `MQL5/Experts/Advisors/` to the same folder on the VPS
+1. Compile `EA/Triton.mq5` on your local MetaEditor
+2. Copy `Triton_v1.0.ex5` from `MQL5/Experts/Advisors/` to the same folder on the VPS
 3. No other changes to `remote_runner.py` needed
 
 ---

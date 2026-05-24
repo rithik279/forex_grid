@@ -1,6 +1,6 @@
-# Seraphim — Regime-Aware Grid Trading System
+# Triton — Regime-Aware Grid Trading System
 
-Seraphim is a grid-based basket EA for MetaTrader 5, paired with a Python automation layer (Antigravity) that runs overnight backtests, ranks parameter sets, and manages deployments on a remote VPS — all synced through OneDrive.
+Triton is a grid-based basket EA for MetaTrader 5, paired with a Python automation layer (Antigravity) that runs overnight backtests, ranks parameter sets, and manages deployments on a remote VPS — all synced through OneDrive.
 
 ---
 
@@ -9,7 +9,7 @@ Seraphim is a grid-based basket EA for MetaTrader 5, paired with a Python automa
 ```
 forex_grid/
 ├── EA/
-│   └── Seraphim.mq5              ← MQL5 Expert Advisor (compile this)
+│   └── Triton_v1.0.mq5              ← MQL5 Expert Advisor (compile this)
 │
 ├── archangel_infra/
 │   ├── remote_runner.py          ← VPS backtest orchestrator (run on VPS)
@@ -51,10 +51,10 @@ pip install -r requirements.txt
 
 ## Quick Start: EA
 
-1. Copy `EA/Seraphim.mq5` to your MT5 `MQL5/Experts/Advisors/` folder
+1. Copy `EA/Triton_v1.0.mq5` to your MT5 `MQL5/Experts/Advisors/` folder
 2. Open MetaEditor → compile → verify 0 errors, 0 warnings
-3. In MT5 Strategy Tester, select `Seraphim`, set symbol + dates, run backtest
-4. Check Journal tab for `"Seraphim v1.0 initialized"` and optimization metrics at end
+3. In MT5 Strategy Tester, select `Triton`, set symbol + dates, run backtest
+4. Check Journal tab for `"Triton v1.0 initialized"` and optimization metrics at end
 
 **Default parameters match the original ArchangelX 3.4 settings:**
 - PipStep = 15.0, PipStepExponent = 1.5
@@ -70,12 +70,12 @@ pip install -r requirements.txt
 On the VPS, `remote_runner.py` watches a OneDrive queue folder for `.set` files, runs BT + FT split backtests, and saves results to `results.csv`.
 
 **Setup on VPS:**
-1. Install Python 3.10+, OneDrive, and compile `Seraphim.ex5` in MT5
+1. Install Python 3.10+, OneDrive, and compile `Triton_v1.0.ex5` in MT5
 2. Verify constants in `remote_runner.py`:
    ```python
    MT5_TERMINAL_PATH = r"C:\Program Files\PU Prime MT5 Terminal-1\terminal64.exe"
    MT5_DATA_FOLDER_NAME = "CB73EB447A09F27F5775C81FBB987ED5"
-   EA_NAME = r"Advisors\Seraphim.ex5"
+   EA_NAME = r"Advisors\Triton_v1.0.ex5"
    ```
 3. Run the worker (leave running overnight):
    ```

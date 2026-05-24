@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                                    Seraphim.mq5  |
+//|                                                  Triton_v1.0.mq5  |
 //|                           Regime-Aware Grid Sequencing EA        |
 //|                                          Version 1.0 — May 2026  |
 //+------------------------------------------------------------------+
@@ -35,7 +35,7 @@
 //
 //+------------------------------------------------------------------+
 
-#property copyright "Seraphim"
+#property copyright "Triton"
 #property link      ""
 #property version   "1.00"
 #property strict
@@ -1438,8 +1438,10 @@ bool OpenFirstTrade(bool isBuy)
    if(CountPositions(posType) >= MaxOrdersPerDirection) return false;
    if(!DirectionAllowedGlobally(posType)) return false;
 
-   SequenceInfo &seq = actualBuy ? g_seqBuy : g_seqSell;
-   return OpenFirstTradeImpl(posType, seq, actualBuy);
+   if(actualBuy)
+      return OpenFirstTradeImpl(posType, g_seqBuy,  actualBuy);
+   else
+      return OpenFirstTradeImpl(posType, g_seqSell, actualBuy);
 }
 
 bool OpenGridTrade(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
@@ -1740,7 +1742,7 @@ int OnInit()
    g_lastBarTimeM1    = 0;
    g_lastEntryBarTime = 0;
 
-   LogMajor("Seraphim v1.0 initialized: " + _Symbol +
+   LogMajor("Triton v1.0 initialized: " + _Symbol +
             " magic=" + IntegerToString((int)MagicNumber) +
             " pipMult=" + IntegerToString(g_pipMultiplier));
 
@@ -1750,7 +1752,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    IndicatorFiltersDeInit();
-   LogMajor("Seraphim deinitialized reason=" + IntegerToString(reason) +
+   LogMajor("Triton deinitialized reason=" + IntegerToString(reason) +
             " seqs=" + IntegerToString(g_metrics.TotalSequences));
 }
 
@@ -1947,7 +1949,7 @@ double OnTester()
    double profitFactor = TesterStatistics(STAT_PROFIT_FACTOR);
    double maxDD      = TesterStatistics(STAT_EQUITY_DD);
 
-   Print("=== Seraphim Optimization Metrics ===");
+   Print("=== Triton Optimization Metrics ===");
    Print("TotalSequences:  ", g_metrics.TotalSequences);
    Print("MaxDepth:        ", g_metrics.MaxDepth);
    Print("AvgDepth:        ", DoubleToString(g_metrics.AvgDepth, 2));

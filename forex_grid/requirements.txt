@@ -1,4 +1,4 @@
-# Seraphim Antigravity — Python dependencies
+# Triton Antigravity — Python dependencies
 # Install: pip install -r requirements.txt
 
 # Dashboard & visualization

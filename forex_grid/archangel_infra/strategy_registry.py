@@ -1,5 +1,5 @@
 """
-strategy_registry.py — CLI tool for managing deployed Seraphim strategies.
+strategy_registry.py — CLI tool for managing deployed Triton strategies.
 
 Each strategy is a markdown card in StrategyRegistry/ plus an entry in registry.json.
 
@@ -281,7 +281,7 @@ def cmd_expiring(args) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Seraphim Strategy Registry — manage deployed strategies",
+        description="Triton Strategy Registry — manage deployed strategies",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
