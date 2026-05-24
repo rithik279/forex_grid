@@ -1,0 +1,14 @@
+# Seraphim Antigravity — Python dependencies
+# Install: pip install -r requirements.txt
+
+# Dashboard & visualization
+streamlit>=1.28
+plotly>=5.0
+
+# Data processing
+pandas>=2.0
+openpyxl>=3.1
+
+# MT5 Python API (VPS only — not needed for dashboard)
+# Install separately on VPS: pip install MetaTrader5
+# MetaTrader5>=5.0.45
