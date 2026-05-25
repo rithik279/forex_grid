@@ -74,7 +74,7 @@ RestartAfterHours=3.0
 DailyProfitTarget=1000.0
 UltimateTargetBalance=0.0
 GlobalEquityStopType=0
-GlobalEquityStopValue=90000.0
+GlobalEquityStopValue=0.0
 ResetGlobalEquityStop=false
 MinSecondsBetweenTrades=0
 ; RSI SETTINGS — optimizer decides on/off
