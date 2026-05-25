@@ -1960,15 +1960,24 @@ double OnTester()
    Print("DailyLossHits:   ", g_metrics.DailyLossHits);
    Print("=====================================");
 
-   // Score: reward profit+consistency, penalize DD+stops+deep grids+long holds
+   double sharpe    = TesterStatistics(STAT_SHARPE_RATIO);
+   double ddPct     = TesterStatistics(STAT_EQUITY_DDPERCENT);   // 0–100
+   int    trades    = (int)TesterStatistics(STAT_TRADES);
+
+   // --- Hard disqualifiers (prop-firm killers) ---
+   if(g_metrics.RiskStopCount > 0) return -100000.0;  // equity stop hit = instant fail
+   if(trades < 10)                 return  -50000.0;  // too few trades = overfit
+
+   // --- Composite prop-firm survival score ---
+   // Rewards: profit, Sharpe (risk-adjusted consistency), profit quality (PF above breakeven)
+   // Penalises: DD%, daily loss rule hits, deep grid exposure
    double score = netProfit
-                + (g_metrics.DailyTargetHits * 500.0)
-                + (profitFactor * 200.0)
-                - (maxDD * 2.0)
-                - (g_metrics.DailyLossHits  * 2000.0)
-                - (g_metrics.RiskStopCount  * 5000.0)
-                - (g_metrics.MaxDepth       * 50.0)
-                - (g_metrics.AvgDuration / 3600.0 * 10.0);
+                + (sharpe * 1000.0)                        // consistency: Sharpe 1.5 → +1500
+                + ((profitFactor - 1.0) * 500.0)           // quality: PF 2.0 → +500, PF 1.0 → 0
+                - (ddPct * 500.0)                          // DD%: 10% → -5000, 5% → -2500
+                - (g_metrics.DailyLossHits  * 1500.0)      // prop rule violation
+                - (g_metrics.MaxDepth       * 30.0)        // grid depth risk
+                - (g_metrics.AvgDuration / 3600.0 * 5.0);  // long holds risk
 
    return score;
 }
