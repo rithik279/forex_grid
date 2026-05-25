@@ -1,19 +1,14 @@
 ; Triton v1.0 — Optimization Template
 ; Thesis: USDJPY Short — Range Ceiling Rejection
-; Regime: Capped 155–160, BoJ intervention at 160, bearish shooting stars at ceiling
-; Direction: SHORT ONLY
+; Regime: BoJ intervention caps 160.00, compressed 155-160, bearish rejections at ceiling
+; Direction: SHORT ONLY (fixed)
 ; Chart TF: M1
-; Optimize on: 2025.12.01 – 2026.03.01 (BT) / 2026.03.01 – 2026.05.01 (FT)
-; Kill condition: BoJ stands down publicly, or DXY breaks 101+
+; BT: 2025.12.01 – 2026.03.01 | FT: 2026.03.01 – 2026.05.01
+; Kill: BoJ stands down publicly, or DXY breaks 101+
 ;
-; REGIME LOGIC:
-;   Range ceiling = sell near 158-160, collect profit near 154-155
-;   BB filter ON in Avoid Extreme mode (block buys at upper band = upper range)
-;   EMA filter OFF (range-bound pair, EMAs choppy and misleading)
-;   ADX filter OFF (range = low ADX, ADX filter would block most entries)
-;   Medium PipStep (predictable range spacing, not as volatile as gold)
-;   Medium MaxOrders (range won't go too far, 8-12 levels enough)
-;   Hard BoJ ceiling = natural stop — grid can go moderately deep safely
+; PHILOSOPHY: Ranges as close to original ArchangelX as possible.
+; Only change: TradeDirection locked SHORT. Filter starting values biased
+; toward range regime (BB on, EMA off, ADX off) but optimizer can override.
 ;
 ; GENERAL TRADE SETTINGS
 AllowNewSequence=true
@@ -27,23 +22,23 @@ LogLevel=1
 LicenseKey=
 ; SEQUENCE SETTINGS
 ATRPeriod=14
-PipStep=12.0||5||3||50||Y
-PipStepExponent=1.4||1.0||0.1||2.2||Y
-MaxPipStep=0.0
-DelayTradeSequence=3||0||1||5||Y
+PipStep=15.0||0||10||200||Y
+PipStepExponent=1.5||1||0.5||5||Y
+MaxPipStep=0.0||1||10||100||Y
+DelayTradeSequence=3
 LiveDelay=0
 LotMultiplierFirstTradeAfterLD=1.0
 CombineLiveDelayTrades=true
 TradeDirection=2
-MaxOrdersPerDirection=10||5||1||18||Y
+MaxOrdersPerDirection=20||1||1||30||Y
 ReverseSequenceDirection=false
 ; MONEY MANAGEMENT SETTINGS
-TakeProfit=50.0||30||10||150||Y
+TakeProfit=50.0
 StopLoss=0.0
 LockProfitMinTrades=0
-LockProfit=25.0||10||5||60||Y
+LockProfit=30.0||1||3||50||Y
 LockProfitCheckMode=0
-TrailingStop=10.0||5||5||30||Y
+TrailingStop=10.0||1||2||20||Y
 TrailingCheckMode=0
 AllowSamePairDirectionTrades=false
 ; COMPOUND SETTINGS
@@ -53,9 +48,9 @@ RiskPercentForCompounding=1.0
 RiskInPips=100.0
 MaxLotSizeForCompounding=10.0
 ; LOTSIZE SETTINGS
-LotSize=0.1||0.05||0.05||0.3||Y
+LotSize=0.1
 RiskPercent=0.0
-LotSizeExponent=1.2||1.0||0.1||2.0||Y
+LotSizeExponent=1.2
 MaxLotSize=1.0
 ; WEEKEND CLOSURE SETTINGS
 CloseForWeekend=true
@@ -64,12 +59,12 @@ TimeToClose=21:00
 DayToRestart=1
 TimeToRestart=01:00
 ; TRADING SESSION SETTINGS
-TradeCustomTimes=true
-TradingSessionMonday=00:00-15:00
-TradingSessionTuesday=00:00-15:00
-TradingSessionWednesday=00:00-15:00
-TradingSessionThursday=00:00-15:00
-TradingSessionFriday=00:00-14:00
+TradeCustomTimes=false
+TradingSessionMonday=00:00-23:59
+TradingSessionTuesday=00:00-23:59
+TradingSessionWednesday=00:00-23:59
+TradingSessionThursday=00:00-23:59
+TradingSessionFriday=00:00-21:00
 ActionAtEndOfSession=0
 ; EQUITY PROTECTOR SETTINGS
 MaxRunningLoss=5000.0
@@ -82,32 +77,32 @@ GlobalEquityStopType=0
 GlobalEquityStopValue=90000.0
 ResetGlobalEquityStop=false
 MinSecondsBetweenTrades=0
-; RSI SETTINGS
-UseRSI=false
-RSITimeframe=1
-RSIPeriod=14
-RSIOverboughtLevel=70.0
-; EMA SETTINGS — OFF for range (EMAs chop in sideways market)
-UseEMA=false
-EMATimeframe=30
-EMAFast=4
-EMAMid=8
-EMASlow=60
+; RSI SETTINGS — optimizer decides on/off
+UseRSI=false||false||0||true||Y
+RSITimeframe=1||1||0||16385||Y
+RSIPeriod=14||5||5||100||Y
+RSIOverboughtLevel=60||55||1||90||Y
+; EMA SETTINGS — start OFF (range-bound), optimizer can turn on
+UseEMA=false||false||0||true||Y
+EMATimeframe=30||1||0||16392||Y
+EMAFast=4||3||1||8||Y
+EMAMid=8||6||2||15||Y
+EMASlow=60||40||10||100||Y
 EMATrendRule=0
-DoubleCheckEMAFirstRealTrade=false
-; ADX SETTINGS — OFF for range (ADX too low in range = always blocked)
-UseADX=false
-ADXTimeframe=30
-ADXPeriod=14
-ADXThreshold=30.0
+DoubleCheckEMAFirstRealTrade=false||false||0||true||Y
+; ADX SETTINGS — start OFF (range = low ADX), optimizer can turn on
+UseADX=false||false||0||true||Y
+ADXTimeframe=30||0||0||16392||Y
+ADXPeriod=14||5||5||100||Y
+ADXThreshold=30.0||25||5||60||Y
 ADXTrendRule=0
-DoubleCheckADXFirstRealTrade=false
-; BOLLINGER BANDS SETTINGS — ON, Avoid Extreme (block shorts when price at lower band)
-UseBollinger=true
-BBMode=0
-BBTimeframe=5||1||5||30||Y
-BBPeriod=20||10||5||40||Y
-BBDeviation=1.5||1.0||0.25||2.5||Y
+DoubleCheckADXFirstRealTrade=false||false||0||true||Y
+; BOLLINGER BANDS SETTINGS — start ON (range ceiling), optimizer can turn off
+UseBollinger=true||false||0||true||Y
+BBMode=0||0||0||1||Y
+BBTimeframe=30||0||0||16392||Y
+BBPeriod=20||50||1||120||Y
+BBDeviation=1.5||0||0.1||5||Y
 ; NEWS FILTER SETTINGS
 UseHighImpactNews=true
 NewsTradesAction=0

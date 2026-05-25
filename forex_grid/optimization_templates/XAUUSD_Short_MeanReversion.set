@@ -1,19 +1,14 @@
 ; Triton v1.0 — Optimization Template
 ; Thesis: XAUUSD Short — Mean Reversion
-; Regime: Range-bound, $4380–$4650, gold overbought, rate hold caps upside
-; Direction: SHORT ONLY
+; Regime: Range-bound $4380-$4650, rate hold caps upside, gold overbought
+; Direction: SHORT ONLY (fixed)
 ; Chart TF: M1
-; Optimize on: 2025.12.01 – 2026.03.01 (BT) / 2026.03.01 – 2026.05.01 (FT)
-; Kill condition: Price holds above $4700 on weekly close
+; BT: 2025.12.01 – 2026.03.01 | FT: 2026.03.01 – 2026.05.01
+; Kill: Price holds above $4700 weekly close
 ;
-; REGIME LOGIC:
-;   Mean reversion = sell from upper range, close near lower range
-;   BB filter ON (sell when price at upper band = overbought extreme)
-;   EMA filter OFF (no trend to follow — we're fading moves)
-;   ADX filter OFF (range = low ADX, ADX filter would block entries)
-;   Tighter PipStep (M1 gold moves fast, grid fills quickly)
-;   More MaxOrders (deep grid safe in range — price will revert)
-;   Shorter TakeProfit (collect small wins at range low)
+; PHILOSOPHY: Ranges as close to original ArchangelX as possible.
+; Only change: TradeDirection locked SHORT. Filter starting values biased
+; toward mean-reversion regime (BB on, EMA off) but optimizer can override.
 ;
 ; GENERAL TRADE SETTINGS
 AllowNewSequence=true
@@ -27,23 +22,23 @@ LogLevel=1
 LicenseKey=
 ; SEQUENCE SETTINGS
 ATRPeriod=14
-PipStep=20.0||10||5||80||Y
-PipStepExponent=1.5||1.0||0.1||2.5||Y
-MaxPipStep=0.0
-DelayTradeSequence=3||0||1||5||Y
+PipStep=15.0||0||10||200||Y
+PipStepExponent=1.5||1||0.5||5||Y
+MaxPipStep=0.0||1||10||100||Y
+DelayTradeSequence=3
 LiveDelay=0
 LotMultiplierFirstTradeAfterLD=1.0
 CombineLiveDelayTrades=true
 TradeDirection=2
-MaxOrdersPerDirection=10||5||1||20||Y
+MaxOrdersPerDirection=20||1||1||30||Y
 ReverseSequenceDirection=false
 ; MONEY MANAGEMENT SETTINGS
-TakeProfit=40.0||20||10||150||Y
+TakeProfit=50.0
 StopLoss=0.0
 LockProfitMinTrades=0
-LockProfit=20.0||10||5||60||Y
+LockProfit=30.0||1||3||50||Y
 LockProfitCheckMode=0
-TrailingStop=10.0||5||5||30||Y
+TrailingStop=10.0||1||2||20||Y
 TrailingCheckMode=0
 AllowSamePairDirectionTrades=false
 ; COMPOUND SETTINGS
@@ -53,9 +48,9 @@ RiskPercentForCompounding=1.0
 RiskInPips=100.0
 MaxLotSizeForCompounding=10.0
 ; LOTSIZE SETTINGS
-LotSize=0.1||0.05||0.05||0.3||Y
+LotSize=0.1
 RiskPercent=0.0
-LotSizeExponent=1.2||1.0||0.1||2.0||Y
+LotSizeExponent=1.2
 MaxLotSize=1.0
 ; WEEKEND CLOSURE SETTINGS
 CloseForWeekend=true
@@ -82,32 +77,32 @@ GlobalEquityStopType=0
 GlobalEquityStopValue=90000.0
 ResetGlobalEquityStop=false
 MinSecondsBetweenTrades=0
-; RSI SETTINGS
-UseRSI=false
-RSITimeframe=1
-RSIPeriod=14
-RSIOverboughtLevel=70.0
-; EMA SETTINGS — OFF for mean reversion
-UseEMA=false
-EMATimeframe=30
-EMAFast=4
-EMAMid=8
-EMASlow=60
+; RSI SETTINGS — optimizer decides on/off
+UseRSI=false||false||0||true||Y
+RSITimeframe=1||1||0||16385||Y
+RSIPeriod=14||5||5||100||Y
+RSIOverboughtLevel=60||55||1||90||Y
+; EMA SETTINGS — start OFF (mean reversion), optimizer can turn on
+UseEMA=false||false||0||true||Y
+EMATimeframe=30||1||0||16392||Y
+EMAFast=4||3||1||8||Y
+EMAMid=8||6||2||15||Y
+EMASlow=60||40||10||100||Y
 EMATrendRule=0
-DoubleCheckEMAFirstRealTrade=false
-; ADX SETTINGS — OFF for mean reversion (range = low ADX, filter blocks too much)
-UseADX=false
-ADXTimeframe=30
-ADXPeriod=14
-ADXThreshold=30.0
+DoubleCheckEMAFirstRealTrade=false||false||0||true||Y
+; ADX SETTINGS — start OFF (range = low ADX), optimizer can turn on
+UseADX=false||false||0||true||Y
+ADXTimeframe=30||0||0||16392||Y
+ADXPeriod=14||5||5||100||Y
+ADXThreshold=30.0||25||5||60||Y
 ADXTrendRule=0
-DoubleCheckADXFirstRealTrade=false
-; BOLLINGER BANDS SETTINGS — ON, Avoid Extreme mode (don't buy into upper band)
-UseBollinger=true
-BBMode=0
-BBTimeframe=5||1||5||30||Y
-BBPeriod=20||10||5||50||Y
-BBDeviation=1.5||1.0||0.25||2.5||Y
+DoubleCheckADXFirstRealTrade=false||false||0||true||Y
+; BOLLINGER BANDS SETTINGS — start ON (mean reversion), optimizer can turn off
+UseBollinger=true||false||0||true||Y
+BBMode=0||0||0||1||Y
+BBTimeframe=30||0||0||16392||Y
+BBPeriod=20||50||1||120||Y
+BBDeviation=1.5||0||0.1||5||Y
 ; NEWS FILTER SETTINGS
 UseHighImpactNews=true
 NewsTradesAction=0
