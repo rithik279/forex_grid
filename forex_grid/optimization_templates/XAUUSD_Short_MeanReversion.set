@@ -1,0 +1,115 @@
+; Triton v1.0 — Optimization Template
+; Thesis: XAUUSD Short — Mean Reversion
+; Regime: Range-bound, $4380–$4650, gold overbought, rate hold caps upside
+; Direction: SHORT ONLY
+; Chart TF: M1
+; Optimize on: 2025.12.01 – 2026.03.01 (BT) / 2026.03.01 – 2026.05.01 (FT)
+; Kill condition: Price holds above $4700 on weekly close
+;
+; REGIME LOGIC:
+;   Mean reversion = sell from upper range, close near lower range
+;   BB filter ON (sell when price at upper band = overbought extreme)
+;   EMA filter OFF (no trend to follow — we're fading moves)
+;   ADX filter OFF (range = low ADX, ADX filter would block entries)
+;   Tighter PipStep (M1 gold moves fast, grid fills quickly)
+;   More MaxOrders (deep grid safe in range — price will revert)
+;   Shorter TakeProfit (collect small wins at range low)
+;
+; GENERAL TRADE SETTINGS
+AllowNewSequence=true
+StrategyDescription=XAUUSD Short Mean Reversion May2026
+TradeComment=Triton_XAUUSD_Short
+MagicNumber=1001
+UseRandomEntryDelay=false
+RandomSeed=42
+LogLevel=1
+; EA LICENSING SETTINGS
+LicenseKey=
+; SEQUENCE SETTINGS
+ATRPeriod=14
+PipStep=20.0||10||5||80||Y
+PipStepExponent=1.5||1.0||0.1||2.5||Y
+MaxPipStep=0.0
+DelayTradeSequence=3||0||1||5||Y
+LiveDelay=0
+LotMultiplierFirstTradeAfterLD=1.0
+CombineLiveDelayTrades=true
+TradeDirection=2
+MaxOrdersPerDirection=10||5||1||20||Y
+ReverseSequenceDirection=false
+; MONEY MANAGEMENT SETTINGS
+TakeProfit=40.0||20||10||150||Y
+StopLoss=0.0
+LockProfitMinTrades=0
+LockProfit=20.0||10||5||60||Y
+LockProfitCheckMode=0
+TrailingStop=10.0||5||5||30||Y
+TrailingCheckMode=0
+AllowSamePairDirectionTrades=false
+; COMPOUND SETTINGS
+UseCompounding=false
+InitialAccountBalanceThreshold=100000.0
+RiskPercentForCompounding=1.0
+RiskInPips=100.0
+MaxLotSizeForCompounding=10.0
+; LOTSIZE SETTINGS
+LotSize=0.1||0.05||0.05||0.3||Y
+RiskPercent=0.0
+LotSizeExponent=1.2||1.0||0.1||2.0||Y
+MaxLotSize=1.0
+; WEEKEND CLOSURE SETTINGS
+CloseForWeekend=true
+DayToClose=5
+TimeToClose=21:00
+DayToRestart=1
+TimeToRestart=01:00
+; TRADING SESSION SETTINGS
+TradeCustomTimes=false
+TradingSessionMonday=00:00-23:59
+TradingSessionTuesday=00:00-23:59
+TradingSessionWednesday=00:00-23:59
+TradingSessionThursday=00:00-23:59
+TradingSessionFriday=00:00-21:00
+ActionAtEndOfSession=0
+; EQUITY PROTECTOR SETTINGS
+MaxRunningLoss=5000.0
+RestartEAAfterLoss=0
+RestartNextDayAt=01:00
+RestartAfterHours=3.0
+DailyProfitTarget=1000.0
+UltimateTargetBalance=0.0
+GlobalEquityStopType=0
+GlobalEquityStopValue=90000.0
+ResetGlobalEquityStop=false
+MinSecondsBetweenTrades=0
+; RSI SETTINGS
+UseRSI=false
+RSITimeframe=1
+RSIPeriod=14
+RSIOverboughtLevel=70.0
+; EMA SETTINGS — OFF for mean reversion
+UseEMA=false
+EMATimeframe=30
+EMAFast=4
+EMAMid=8
+EMASlow=60
+EMATrendRule=0
+DoubleCheckEMAFirstRealTrade=false
+; ADX SETTINGS — OFF for mean reversion (range = low ADX, filter blocks too much)
+UseADX=false
+ADXTimeframe=30
+ADXPeriod=14
+ADXThreshold=30.0
+ADXTrendRule=0
+DoubleCheckADXFirstRealTrade=false
+; BOLLINGER BANDS SETTINGS — ON, Avoid Extreme mode (don't buy into upper band)
+UseBollinger=true
+BBMode=0
+BBTimeframe=5||1||5||30||Y
+BBPeriod=20||10||5||50||Y
+BBDeviation=1.5||1.0||0.25||2.5||Y
+; NEWS FILTER SETTINGS
+UseHighImpactNews=true
+NewsTradesAction=0
+CloseMinutesBeforeNews=60
+PauseMinutesAfterNews=60
