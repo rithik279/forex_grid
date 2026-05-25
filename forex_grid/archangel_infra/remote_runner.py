@@ -115,12 +115,11 @@ def load_remote_config():
 # --- CONFIGURATION (REMOTE) ---
 
 # 1. MT5 Terminal Path (Executable)
-MT5_TERMINAL_PATH = r"C:\Program Files\PU Prime MT5 Terminal-1\terminal64.exe"
+MT5_TERMINAL_PATH = r"C:\Program Files\PU Prime MT5 Terminal 3\terminal64.exe"
 
 # 2. MT5 Data Folder (The "Hash" folder in AppData)
-# User provided: C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\CB73EB447A09F27F5775C81FBB987ED5
-# We use os.getenv('APPDATA') to be robust (C:\Users\Administrator\AppData\Roaming)
-MT5_DATA_FOLDER_NAME = "CB73EB447A09F27F5775C81FBB987ED5"
+# VPS path: C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\4DD4830CED22D85EB83791D341D29B0C
+MT5_DATA_FOLDER_NAME = "4DD4830CED22D85EB83791D341D29B0C"
 MT5_DATA_FOLDER = os.path.join(os.getenv("APPDATA"), "MetaQuotes", "Terminal", MT5_DATA_FOLDER_NAME)
 
 # 3. Paths inside Data Folder (Strict Non-Negotiable)
