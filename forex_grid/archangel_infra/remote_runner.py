@@ -6,7 +6,88 @@ import shutil
 import csv
 import re
 import json
+import base64
+import requests
 from datetime import datetime, timedelta
+
+# ── GitHub bridge config ────────────────────────────────────────────────────
+GH_TOKEN  = os.environ.get("GITHUB_TOKEN", "")
+GH_REPO   = os.environ.get("GITHUB_REPO",  "rithik279/forex_grid")
+GH_BRANCH = os.environ.get("GITHUB_BRANCH","main")
+GH_QUEUE_PATH   = "forex_grid/data/queue"
+GH_RESULTS_PATH = "forex_grid/data/results.csv"
+
+def _gh_headers():
+    if not GH_TOKEN:
+        return {}
+    return {"Authorization": f"token {GH_TOKEN}",
+            "Accept": "application/vnd.github.v3+json"}
+
+def check_github_queue(local_queue_dir):
+    """Download any .set files from GitHub data/queue/ into local Queue dir."""
+    if not GH_TOKEN:
+        return
+    url = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_QUEUE_PATH}"
+    try:
+        r = requests.get(url, headers=_gh_headers(), params={"ref": GH_BRANCH}, timeout=15)
+        if r.status_code == 404:
+            return  # folder doesn't exist yet
+        if r.status_code != 200:
+            print(f"  [GH Queue] API error {r.status_code}")
+            return
+        files = r.json()
+        if not isinstance(files, list):
+            return
+        for f in files:
+            if not f.get("name", "").endswith(".set"):
+                continue
+            local_path = os.path.join(local_queue_dir, f["name"])
+            if os.path.exists(local_path):
+                continue  # already downloaded
+            # Download content
+            fr = requests.get(f["download_url"], timeout=15)
+            if fr.status_code == 200:
+                with open(local_path, "w", encoding="utf-8") as out:
+                    out.write(fr.text)
+                print(f"  [GH Queue] Downloaded: {f['name']}")
+                # Delete from GitHub queue
+                _gh_delete_file(GH_QUEUE_PATH + "/" + f["name"], f["sha"])
+    except Exception as e:
+        print(f"  [GH Queue] Error: {e}")
+
+def _gh_delete_file(path, sha):
+    """Delete a file from GitHub repo."""
+    url = f"https://api.github.com/repos/{GH_REPO}/contents/{path}"
+    body = {"message": f"remote_runner: processed {path}",
+            "sha": sha, "branch": GH_BRANCH}
+    try:
+        requests.delete(url, headers=_gh_headers(), json=body, timeout=15)
+    except Exception as e:
+        print(f"  [GH Delete] Error: {e}")
+
+def push_results_to_github(results_csv_path):
+    """Push local results.csv to GitHub."""
+    if not GH_TOKEN or not os.path.exists(results_csv_path):
+        return
+    try:
+        with open(results_csv_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        encoded = base64.b64encode(content.encode()).decode()
+        # Get current SHA
+        url = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_RESULTS_PATH}"
+        r = requests.get(url, headers=_gh_headers(), params={"ref": GH_BRANCH}, timeout=15)
+        sha = r.json().get("sha") if r.status_code == 200 else None
+        body = {
+            "message": f"remote_runner: update results {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC",
+            "content": encoded,
+            "branch": GH_BRANCH,
+        }
+        if sha:
+            body["sha"] = sha
+        requests.put(url, headers=_gh_headers(), json=body, timeout=30)
+        print("  [GH Results] Pushed results.csv to GitHub.")
+    except Exception as e:
+        print(f"  [GH Results] Push error: {e}")
 
 METRIC_COLS = ["Profit", "Drawdown", "DrawdownPct", "Trades", "WinRate",
                "ProfitFactor", "ExpectedPayoff", "AvgProfitTrade", "AvgLossTrade", "MaxConsecLosses"]
@@ -340,9 +421,12 @@ def run_worker():
     init_results_csv()
 
     while True:
+        # Pull any new .set files from GitHub queue
+        check_github_queue(QUEUE_DIR)
+
         queue_files = glob.glob(os.path.join(QUEUE_DIR, "*.set"))
         if not queue_files:
-            time.sleep(2)
+            time.sleep(10)
             continue
 
         for set_file_source in queue_files:
@@ -432,6 +516,9 @@ def run_worker():
                 writer = csv.writer(f)
                 writer.writerow(row_list)
             print("  Combined Results Saved.")
+
+            # Push results to GitHub so dashboard can read them
+            push_results_to_github(RESULTS_CSV)
 
             # 5a. Cleanup HTML Reports for this specific run
             try:
