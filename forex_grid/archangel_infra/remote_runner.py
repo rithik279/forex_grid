@@ -220,7 +220,7 @@ MQL5_PROFILES_TESTER = os.path.join(MT5_DATA_FOLDER, "MQL5", "Profiles", "Tester
 MT5_REPORTS_DIR = os.path.join(MT5_DATA_FOLDER, "reports")
 
 # 4. Config Settings
-EA_NAME = r"Advisors\Triton_v1.0.ex5" # Relative to MQL5\Experts
+EA_NAME = r"Triton_v1.0.ex5" # Relative to MQL5\Experts
 SYMBOL = "NAS100ft.s"
 PERIOD = "M1"
 DEPOSIT = "50000"
