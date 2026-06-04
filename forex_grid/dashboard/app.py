@@ -450,7 +450,7 @@ if page == "🔬 Set Finder":
         fmt = {c: "{:.2f}" for c in df_show.select_dtypes("float").columns}
         styled = (df_show.style
                   .format(fmt)
-                  .applymap(tier_color, subset=["Tier"])
+                  .map(tier_color, subset=["Tier"])
                   .background_gradient(subset=["Score"], cmap="RdYlGn", vmin=50, vmax=100)
                   .background_gradient(subset=["Est_Total_Profit"], cmap="Greens"))
         st.dataframe(styled, use_container_width=True, height=520)
