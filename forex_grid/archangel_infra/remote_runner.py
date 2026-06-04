@@ -363,14 +363,26 @@ def parse_set_file(filepath):
         print(f"  [Warning] Failed to parse set file {os.path.basename(filepath)}: {e}")
     return inputs
 
-def create_ini_file(set_filename_relative, report_base_relative, from_date, to_date, inputs=None):
+def detect_symbol_from_filename(filename):
+    """Extract broker symbol from set filename, e.g. AUDUSD_Long_Breakout_Pass123.set -> AUDUSD.s"""
+    known = ["XAUUSD", "EURUSD", "AUDUSD", "USDJPY", "GBPUSD", "USDCAD", "NAS100", "US30"]
+    base = os.path.basename(filename).upper()
+    for sym in known:
+        if base.startswith(sym):
+            # Use broker suffix from global SYMBOL (e.g. ".s" or "ft.s")
+            suffix = SYMBOL[SYMBOL.find("."):]  if "." in SYMBOL else ""
+            return sym + suffix
+    return SYMBOL  # fallback to config
+
+def create_ini_file(set_filename_relative, report_base_relative, from_date, to_date, inputs=None, symbol_override=None):
     """
     Generates the MT5 configuration file.
     """
+    sym = symbol_override if symbol_override else SYMBOL
     conf = f'''[Tester]
 Expert={EA_NAME}
 ExpertParameters={set_filename_relative}
-Symbol={SYMBOL}
+Symbol={sym}
 Period={PERIOD}
 Optimization=0
 OptimizationCriterion=0
@@ -435,6 +447,7 @@ def run_worker():
 
             # 0. Load Dynamic Configuration
             load_remote_config()
+            file_symbol = detect_symbol_from_filename(filename)
 
             # 1. Move to Processing (OneDrive)
             processing_path_onedrive = os.path.join(PROCESSING_DIR, filename)
@@ -454,7 +467,7 @@ def run_worker():
             report_bt_name = f"Report_{filename.replace('.set', '')}_BT"
             report_bt_val = f"reports\\{report_bt_name}" # No extension, MT5 adds .htm
             
-            ini_bt = create_ini_file(f"Profiles\\Tester\\{filename}", report_bt_val, FROM_DATE, FORWARD_SPLIT_DATE, inputs=set_inputs)
+            ini_bt = create_ini_file(f"Profiles\\Tester\\{filename}", report_bt_val, FROM_DATE, FORWARD_SPLIT_DATE, inputs=set_inputs, symbol_override=file_symbol)
             
             # Write INI and Run
             with open(os.path.join(PROCESSING_DIR, "mt5.ini"), "w") as f: f.write(ini_bt)
@@ -474,7 +487,7 @@ def run_worker():
             report_ft_name = f"Report_{filename.replace('.set', '')}_FWD"
             report_ft_val = f"reports\\{report_ft_name}"
             
-            ini_ft = create_ini_file(f"Profiles\\Tester\\{filename}", report_ft_val, FORWARD_SPLIT_DATE, TO_DATE, inputs=set_inputs)
+            ini_ft = create_ini_file(f"Profiles\\Tester\\{filename}", report_ft_val, FORWARD_SPLIT_DATE, TO_DATE, inputs=set_inputs, symbol_override=file_symbol)
             
             # Write INI and Run
             with open(os.path.join(PROCESSING_DIR, "mt5.ini"), "w") as f: f.write(ini_ft)
