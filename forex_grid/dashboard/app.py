@@ -17,7 +17,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import os, json, base64, requests, math, zipfile, re
+import os, json, base64, requests, math, zipfile, re, gc
 from datetime import datetime
 from io import StringIO, BytesIO
 import xml.etree.ElementTree as ET
@@ -158,61 +158,84 @@ TIER_COLORS = {
 
 # ── XML parsing ──────────────────────────────────────────────────────────────
 def parse_mt5_xml(content_bytes):
-    """Parse MT5 Excel 2003 XML optimization export. Returns (DataFrame, deposit)."""
+    """Parse MT5 Excel 2003 XML optimization export using iterparse (low memory). Returns (DataFrame, deposit)."""
     try:
         if isinstance(content_bytes, bytes):
             text = content_bytes.decode("utf-8", errors="replace")
         else:
             text = content_bytes
 
-        root = ET.fromstring(text.encode("utf-8"))
         ns_ss = "urn:schemas-microsoft-com:office:spreadsheet"
         ns_o  = "urn:schemas-microsoft-com:office:office"
+        tag_row     = f"{{{ns_ss}}}Row"
+        tag_cell    = f"{{{ns_ss}}}Cell"
+        tag_data    = f"{{{ns_ss}}}Data"
+        tag_deposit = f"{{{ns_o}}}Deposit"
+        attr_type   = f"{{{ns_ss}}}Type"
 
         deposit = 50000.0
-        dp = root.find(f"{{{ns_o}}}DocumentProperties")
-        if dp is not None:
-            dep = dp.find(f"{{{ns_o}}}Deposit")
-            if dep is not None and dep.text:
-                try:
-                    deposit = float(dep.text.split()[0])
-                except Exception:
-                    pass
-
-        ns = {"ss": ns_ss}
-        rows = root.findall(".//ss:Row", ns)
-        if not rows:
-            return pd.DataFrame(), deposit
-
-        headers = [c.text or "" for c in rows[0].findall("ss:Cell/ss:Data", ns)]
+        headers = []
         data = []
-        for row in rows[1:]:
-            cells = row.findall("ss:Cell/ss:Data", ns)
-            vals = []
-            for c in cells:
-                t = c.get(f"{{{ns_ss}}}Type", "String")
-                txt = c.text or ""
-                if t == "Number":
-                    try:
-                        vals.append(float(txt))
-                    except Exception:
-                        vals.append(txt)
-                else:
-                    vals.append(txt)
-            if vals:
-                while len(vals) < len(headers):
-                    vals.append("")
-                data.append(vals[:len(headers)])
 
-        return pd.DataFrame(data, columns=headers), deposit
+        for event, elem in ET.iterparse(StringIO(text), events=("end",)):
+            tag = elem.tag
+            if tag == tag_deposit:
+                if elem.text:
+                    try:
+                        deposit = float(elem.text.split()[0])
+                    except Exception:
+                        pass
+                elem.clear()
+            elif tag == tag_row:
+                vals = []
+                for cell in elem:
+                    if cell.tag != tag_cell:
+                        continue
+                    d = cell.find(tag_data)
+                    if d is None:
+                        vals.append("")
+                        continue
+                    txt = d.text or ""
+                    if d.get(attr_type) == "Number":
+                        try:
+                            vals.append(float(txt))
+                        except Exception:
+                            vals.append(txt)
+                    else:
+                        vals.append(txt)
+                if not headers:
+                    headers = vals
+                elif vals:
+                    while len(vals) < len(headers):
+                        vals.append("")
+                    data.append(vals[:len(headers)])
+                elem.clear()
+
+        del text
+        gc.collect()
+        return pd.DataFrame(data, columns=headers) if data else pd.DataFrame(), deposit
     except Exception as e:
         st.error(f"XML parse error: {e}")
         return pd.DataFrame(), 50000.0
 
+
+def _trim_to_scoring_cols(df, pass_col):
+    """Keep only Pass + columns needed for scoring — drops all EA param columns."""
+    patterns = ["profit", "equity dd", "equity drawdown", "trades"]
+    keep = [col for col in df.columns
+            if col == pass_col or any(p in col.lower() for p in patterns)]
+    return df[keep]
+
+
 def process_xml_pair(bt_bytes, ft_bytes, deposit_override, target_dd):
     """Merge BT+FT XMLs, compute Archangel X scores. Returns scored DataFrame."""
     df_bt, dep_bt = parse_mt5_xml(bt_bytes)
-    df_ft, _      = parse_mt5_xml(ft_bytes)
+    bt_bytes = None
+    gc.collect()
+
+    df_ft, _ = parse_mt5_xml(ft_bytes)
+    ft_bytes = None
+    gc.collect()
 
     if df_bt.empty or df_ft.empty:
         return pd.DataFrame()
@@ -225,12 +248,19 @@ def process_xml_pair(bt_bytes, ft_bytes, deposit_override, target_dd):
         st.error("No 'Pass' column found in XML.")
         return pd.DataFrame()
 
+    # Trim to only scoring columns BEFORE prefixing — this is the main memory win
+    df_bt = _trim_to_scoring_cols(df_bt, pass_col_bt)
+    df_ft = _trim_to_scoring_cols(df_ft, pass_col_ft)
+    gc.collect()
+
     df_bt = df_bt.rename(columns={pass_col_bt: "Pass"})
     df_ft = df_ft.rename(columns={pass_col_ft: "Pass"})
     df_bt = df_bt.add_prefix("BT_").rename(columns={"BT_Pass": "Pass"})
     df_ft = df_ft.add_prefix("FT_").rename(columns={"FT_Pass": "Pass"})
 
     merged = pd.merge(df_bt, df_ft, on="Pass", how="inner")
+    del df_bt, df_ft
+    gc.collect()
 
     def fcol(prefix, pattern):
         candidates = [c for c in merged.columns
