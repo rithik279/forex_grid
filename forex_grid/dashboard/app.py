@@ -573,7 +573,7 @@ elif page == "📊 Results Analytics":
         min_bt    = fc1.number_input("Min BT Profit",   value=-999999.0)
         min_ft    = fc2.number_input("Min FT Profit",   value=-999999.0)
         min_score = fc3.number_input("Min RegimeScore", value=-999999.0)
-        hide_no_data = fc4.checkbox("Hide runs with no BT data", value=True)
+        hide_no_data = fc4.checkbox("Hide runs with no BT data", value=False)
 
         if hide_no_data and "BT_Profit" in df.columns:
             df = df[df["BT_Profit"].notna()]
