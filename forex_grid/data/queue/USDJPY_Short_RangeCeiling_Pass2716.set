@@ -1,0 +1,110 @@
+; Triton v1.0 — Optimization Template
+; Thesis: USDJPY Short — Range Ceiling Rejection
+; Regime: BoJ intervention caps 160.00, compressed 155-160, bearish rejections at ceiling
+; Direction: SHORT ONLY (fixed)
+; Chart TF: M1
+; BT: 2025.12.01 – 2026.03.01 | FT: 2026.03.01 – 2026.05.01
+; Kill: BoJ stands down publicly, or DXY breaks 101+
+;
+; PHILOSOPHY: Ranges as close to original ArchangelX as possible.
+; Only change: TradeDirection locked SHORT. Filter starting values biased
+; toward range regime (BB on, EMA off, ADX off) but optimizer can override.
+;
+; GENERAL TRADE SETTINGS
+AllowNewSequence=true
+StrategyDescription=USDJPY Short Range Ceiling May2026
+TradeComment=Triton_USDJPY_Short
+MagicNumber=1003
+UseRandomEntryDelay=false
+RandomSeed=42
+LogLevel=1
+; EA LICENSING SETTINGS
+LicenseKey=
+; SEQUENCE SETTINGS
+ATRPeriod=14
+PipStep=15.0
+PipStepExponent=1.5
+MaxPipStep=0.0
+DelayTradeSequence=3
+LiveDelay=0
+LotMultiplierFirstTradeAfterLD=1.0
+CombineLiveDelayTrades=true
+TradeDirection=2
+MaxOrdersPerDirection=20
+ReverseSequenceDirection=false
+; MONEY MANAGEMENT SETTINGS
+TakeProfit=50.0
+StopLoss=0.0
+LockProfitMinTrades=0
+LockProfit=43.0
+LockProfitCheckMode=0
+TrailingStop=10.0
+TrailingCheckMode=0
+AllowSamePairDirectionTrades=false
+; COMPOUND SETTINGS
+UseCompounding=false
+InitialAccountBalanceThreshold=100000.0
+RiskPercentForCompounding=1.0
+RiskInPips=100.0
+MaxLotSizeForCompounding=10.0
+; LOTSIZE SETTINGS
+LotSize=0.22
+RiskPercent=0.0
+LotSizeExponent=1.2
+MaxLotSize=1.0
+; WEEKEND CLOSURE SETTINGS
+CloseForWeekend=true
+DayToClose=5
+TimeToClose=21:00
+DayToRestart=1
+TimeToRestart=01:00
+; TRADING SESSION SETTINGS
+TradeCustomTimes=false
+TradingSessionMonday=00:00-23:59
+TradingSessionTuesday=00:00-23:59
+TradingSessionWednesday=00:00-23:59
+TradingSessionThursday=00:00-23:59
+TradingSessionFriday=00:00-21:00
+ActionAtEndOfSession=0
+; EQUITY PROTECTOR SETTINGS
+MaxRunningLoss=5000.0
+RestartEAAfterLoss=0
+RestartNextDayAt=01:00
+RestartAfterHours=3.0
+DailyProfitTarget=1000.0
+UltimateTargetBalance=0.0
+GlobalEquityStopType=0
+GlobalEquityStopValue=0.0
+ResetGlobalEquityStop=false
+MinSecondsBetweenTrades=0
+; RSI SETTINGS — optimizer decides on/off
+UseRSI=false
+RSITimeframe=1
+RSIPeriod=14
+RSIOverboughtLevel=60
+; EMA SETTINGS — start OFF (range-bound), optimizer can turn on
+UseEMA=false
+EMATimeframe=30
+EMAFast=4
+EMAMid=8
+EMASlow=60
+EMATrendRule=0
+DoubleCheckEMAFirstRealTrade=false
+; ADX SETTINGS — start OFF (range = low ADX), optimizer can turn on
+UseADX=false
+ADXTimeframe=30
+ADXPeriod=14
+ADXThreshold=30.0
+ADXTrendRule=0
+DoubleCheckADXFirstRealTrade=false
+; BOLLINGER BANDS SETTINGS — start ON (range ceiling), optimizer can turn off
+UseBollinger=true
+BBMode=0
+BBTimeframe=30
+BBPeriod=20
+BBDeviation=1.5
+; NEWS FILTER SETTINGS
+UseHighImpactNews=true
+NewsTradesAction=0
+CloseMinutesBeforeNews=60
+PauseMinutesAfterNews=60
