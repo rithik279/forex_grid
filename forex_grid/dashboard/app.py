@@ -552,6 +552,10 @@ elif page == "📊 Results Analytics":
         st.info("No results yet. Run remote_runner and let it push `data/results.csv` to see data here.")
         st.stop()
 
+    # Drop rows with no BT data (failed runs)
+    if "BT_Profit" in df.columns:
+        df = df[df["BT_Profit"].notna()].reset_index(drop=True)
+
     if "Pass" in df.columns:
         df["Pass"] = df["Pass"].astype(str)
 
@@ -569,14 +573,11 @@ elif page == "📊 Results Analytics":
 
     st.markdown("---")
     with st.expander("🔍 Filters", expanded=False):
-        fc1, fc2, fc3, fc4 = st.columns(4)
+        fc1, fc2, fc3 = st.columns(3)
         min_bt    = fc1.number_input("Min BT Profit",   value=-999999.0)
         min_ft    = fc2.number_input("Min FT Profit",   value=-999999.0)
         min_score = fc3.number_input("Min RegimeScore", value=-999999.0)
-        hide_no_data = fc4.checkbox("Hide runs with no BT data", value=False)
 
-        if hide_no_data and "BT_Profit" in df.columns:
-            df = df[df["BT_Profit"].notna()]
         if "BT_Profit"   in df.columns: df = df[df["BT_Profit"]   >= min_bt]
         if "FT_Profit"   in df.columns: df = df[df["FT_Profit"]   >= min_ft]
         if "RegimeScore" in df.columns: df = df[df["RegimeScore"] >= min_score]
