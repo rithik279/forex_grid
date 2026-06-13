@@ -16,6 +16,7 @@ GH_REPO   = os.environ.get("GITHUB_REPO",  "rithik279/forex_grid")
 GH_BRANCH = os.environ.get("GITHUB_BRANCH","main")
 GH_QUEUE_PATH   = "forex_grid/data/queue"
 GH_RESULTS_PATH = "forex_grid/data/results.csv"
+GH_CONFIG_PATH  = "forex_grid/data/remote_config.json"
 
 def _gh_headers():
     if not GH_TOKEN:
@@ -64,6 +65,23 @@ def _gh_delete_file(path, sha):
         requests.delete(url, headers=_gh_headers(), json=body, timeout=15)
     except Exception as e:
         print(f"  [GH Delete] Error: {e}")
+
+def sync_config_from_github():
+    """Pull remote_config.json from GitHub and overwrite local OneDrive copy."""
+    if not GH_TOKEN:
+        return
+    try:
+        url = f"https://raw.githubusercontent.com/{GH_REPO}/{GH_BRANCH}/{GH_CONFIG_PATH}"
+        r = requests.get(url, headers=_gh_headers(), timeout=15)
+        if r.status_code == 200:
+            local_path = os.path.join(ONEDRIVE_ROOT, "remote_config.json")
+            with open(local_path, "w", encoding="utf-8") as f:
+                f.write(r.text)
+            print("  [GH Config] Synced remote_config.json from GitHub.")
+        else:
+            print(f"  [GH Config] Could not fetch config: {r.status_code}")
+    except Exception as e:
+        print(f"  [GH Config] Sync error: {e}")
 
 def push_results_to_github(results_csv_path):
     """Push local results.csv to GitHub."""
@@ -433,7 +451,8 @@ def run_worker():
     init_results_csv()
 
     while True:
-        # Pull any new .set files from GitHub queue
+        # Sync config + queue from GitHub
+        sync_config_from_github()
         check_github_queue(QUEUE_DIR)
 
         queue_files = glob.glob(os.path.join(QUEUE_DIR, "*.set"))
