@@ -6,5 +6,6 @@
     "ToDate": "2026.06.08",
     "ClearResults": false,
     "MT5TerminalPath": "C:\\Program Files\\PU Prime MT5 Terminal 2\\terminal64.exe",
-    "MT5DataFolderName": "FDFD46F1C842DA981CA8507F035DD9E0"
+    "MT5DataFolderName": "FDFD46F1C842DA981CA8507F035DD9E0",
+    "EAName": "Triton_v1.1_AUDITED.ex5"
 }
