@@ -178,7 +178,7 @@ def load_remote_config():
     Loads dynamic configuration from OneDrive if available.
     Updates global variables.
     """
-    global SYMBOL, DEPOSIT, FROM_DATE, TO_DATE, FORWARD_SPLIT_DATE, MT5_TERMINAL_PATH, MT5_DATA_FOLDER, MT5_DATA_FOLDER_NAME, MQL5_PROFILES_TESTER, MT5_REPORTS_DIR
+    global SYMBOL, DEPOSIT, FROM_DATE, TO_DATE, FORWARD_SPLIT_DATE, MT5_TERMINAL_PATH, MT5_DATA_FOLDER, MT5_DATA_FOLDER_NAME, MQL5_PROFILES_TESTER, MT5_REPORTS_DIR, EA_NAME
     config_path = os.path.join(ONEDRIVE_ROOT, "remote_config.json")
     
     if os.path.exists(config_path):
@@ -214,6 +214,7 @@ def load_remote_config():
                 MT5_DATA_FOLDER = os.path.join(os.getenv("APPDATA"), "MetaQuotes", "Terminal", MT5_DATA_FOLDER_NAME)
                 MQL5_PROFILES_TESTER = os.path.join(MT5_DATA_FOLDER, "MQL5", "Profiles", "Tester")
                 MT5_REPORTS_DIR = os.path.join(MT5_DATA_FOLDER, "reports")
+            if data.get("EAName"): EA_NAME = data["EAName"]
             print(f"  [Config] Loaded: {SYMBOL}, ${DEPOSIT}, {FROM_DATE} -> {FORWARD_SPLIT_DATE} -> {TO_DATE}")
             print(f"  [Config] Terminal: {MT5_TERMINAL_PATH}")
             

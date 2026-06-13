@@ -672,10 +672,19 @@ elif page == "⚙️ Runner Config":
 
     cfg = load_remote_config()
 
+    AVAILABLE_EAS = [
+        "Triton_v1.1_AUDITED.ex5",
+        "Triton_v1.0.ex5",
+    ]
+
     with st.form("config_form"):
         c1, c2 = st.columns(2)
         symbol  = c1.text_input("Symbol",  value=cfg.get("Symbol","EURUSD.s"))
         deposit = c2.number_input("Deposit", value=float(cfg.get("Deposit",50000)))
+
+        current_ea = cfg.get("EAName", "Triton_v1.1_AUDITED.ex5")
+        ea_index = AVAILABLE_EAS.index(current_ea) if current_ea in AVAILABLE_EAS else 0
+        ea_name = st.selectbox("EA File", AVAILABLE_EAS, index=ea_index)
 
         c3, c4, c5 = st.columns(3)
         def parse_dt(key, fallback):
@@ -704,6 +713,7 @@ elif page == "⚙️ Runner Config":
             "ClearResults": clear_results,
             "MT5TerminalPath": terminal_path,
             "MT5DataFolderName": data_folder,
+            "EAName": ea_name,
         }
         _, sha = gh_get_file(REMOTE_CONFIG_PATH)
         ok, resp = gh_put_file(
