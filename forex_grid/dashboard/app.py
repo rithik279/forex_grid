@@ -405,6 +405,31 @@ no_token = not GITHUB_TOKEN
 if no_token:
     st.sidebar.warning("⚠️ GITHUB_TOKEN not set — read-only mode")
 
+# ── Worker heartbeat badge (H2) ──────────────────────────────────────────────
+HEARTBEAT_PATH = "forex_grid/data/runner_heartbeat.json"
+
+def render_worker_status():
+    raw = gh_raw(HEARTBEAT_PATH)
+    if not raw:
+        st.sidebar.error("🔴 Worker: no heartbeat seen")
+        return
+    try:
+        hb = json.loads(raw)
+        last = datetime.strptime(hb["utc"], "%Y-%m-%d %H:%M:%S")
+        age = (datetime.utcnow() - last).total_seconds()
+    except Exception:
+        st.sidebar.warning("🟡 Worker: heartbeat unreadable")
+        return
+    if age < 90:
+        st.sidebar.success(f"🟢 Worker live · {int(age)}s ago")
+    elif age < 600:
+        st.sidebar.warning(f"🟡 Worker quiet · {int(age//60)}m ago")
+    else:
+        st.sidebar.error(f"🔴 Worker down · {int(age//60)}m ago")
+    st.sidebar.caption(f"job: `{hb.get('job','?')}` · v{hb.get('version','?')}")
+
+render_worker_status()
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PAGE 1 — SET FINDER

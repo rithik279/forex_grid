@@ -5,24 +5,81 @@ import glob
 import shutil
 import csv
 import re
+import io
 import json
 import base64
+import logging
 import requests
 from datetime import datetime, timedelta
+
+# ── Version stamp (H4) ───────────────────────────────────────────────────────
+# Bump on every meaningful change. Printed on boot + sent in heartbeat so the
+# dashboard can detect a VPS running stale code.
+__version__ = "2026-06-14.1"
 
 # ── GitHub bridge config ────────────────────────────────────────────────────
 GH_TOKEN  = os.environ.get("GITHUB_TOKEN", "")
 GH_REPO   = os.environ.get("GITHUB_REPO",  "rithik279/forex_grid")
 GH_BRANCH = os.environ.get("GITHUB_BRANCH","main")
-GH_QUEUE_PATH   = "forex_grid/data/queue"
-GH_RESULTS_PATH = "forex_grid/data/results.csv"
-GH_CONFIG_PATH  = "forex_grid/data/remote_config.json"
+GH_QUEUE_PATH     = "forex_grid/data/queue"
+GH_RESULTS_PATH   = "forex_grid/data/results.csv"
+GH_CONFIG_PATH    = "forex_grid/data/remote_config.json"
+GH_HEARTBEAT_PATH = "forex_grid/data/runner_heartbeat.json"
+
+# Hard ceiling on a single MT5 tester invocation (H1). Kill + fail past this.
+MT5_RUN_TIMEOUT_SEC = int(os.environ.get("MT5_RUN_TIMEOUT_SEC", "900"))  # 15 min
+
+# ── Logging (H5) ─────────────────────────────────────────────────────────────
+# Logs to console AND a rotating file in the OneDrive folder so you can read the
+# runner's history from your local machine without an RDP session.
+log = logging.getLogger("remote_runner")
+
+
+def _setup_logging(onedrive_root):
+    log.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s",
+                            "%Y-%m-%d %H:%M:%S")
+    sh = logging.StreamHandler()
+    sh.setFormatter(fmt)
+    log.addHandler(sh)
+    try:
+        from logging.handlers import RotatingFileHandler
+        fh = RotatingFileHandler(os.path.join(onedrive_root, "runner.log"),
+                                 maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+        fh.setFormatter(fmt)
+        log.addHandler(fh)
+    except Exception as e:
+        log.warning(f"File logging unavailable: {e}")
+
 
 def _gh_headers():
     if not GH_TOKEN:
         return {}
     return {"Authorization": f"token {GH_TOKEN}",
             "Accept": "application/vnd.github.v3+json"}
+
+
+def gh_request(method, url, retries=3, backoff=1.5, **kwargs):
+    """
+    HTTP wrapper with retry + exponential backoff (M2).
+    Retries on network errors and 5xx/429. Returns the Response (caller checks
+    status) or None if all attempts failed.
+    """
+    kwargs.setdefault("headers", _gh_headers())
+    kwargs.setdefault("timeout", 20)
+    delay = backoff
+    for attempt in range(1, retries + 1):
+        try:
+            r = requests.request(method, url, **kwargs)
+            if r.status_code < 500 and r.status_code != 429:
+                return r
+            log.warning(f"GH {method} {r.status_code} (attempt {attempt}/{retries})")
+        except requests.RequestException as e:
+            log.warning(f"GH {method} error: {e} (attempt {attempt}/{retries})")
+        if attempt < retries:
+            time.sleep(delay)
+            delay *= 2
+    return None
 
 def check_github_queue(local_queue_dir):
     """Download any .set files from GitHub data/queue/ into local Queue dir."""
@@ -34,7 +91,7 @@ def check_github_queue(local_queue_dir):
         if r.status_code == 404:
             return  # folder doesn't exist yet
         if r.status_code != 200:
-            print(f"  [GH Queue] API error {r.status_code}")
+            log.warning(f"GH Queue API error {r.status_code}")
             return
         files = r.json()
         if not isinstance(files, list):
@@ -50,11 +107,11 @@ def check_github_queue(local_queue_dir):
             if fr.status_code == 200:
                 with open(local_path, "w", encoding="utf-8") as out:
                     out.write(fr.text)
-                print(f"  [GH Queue] Downloaded: {f['name']}")
+                log.info(f"GH Queue downloaded: {f['name']}")
                 # Delete from GitHub queue
                 _gh_delete_file(GH_QUEUE_PATH + "/" + f["name"], f["sha"])
     except Exception as e:
-        print(f"  [GH Queue] Error: {e}")
+        log.warning(f"GH Queue error: {e}")
 
 def _gh_delete_file(path, sha):
     """Delete a file from GitHub repo."""
@@ -64,48 +121,182 @@ def _gh_delete_file(path, sha):
     try:
         requests.delete(url, headers=_gh_headers(), json=body, timeout=15)
     except Exception as e:
-        print(f"  [GH Delete] Error: {e}")
+        log.warning(f"GH Delete error: {e}")
 
 def sync_config_from_github():
     """Pull remote_config.json from GitHub and overwrite local OneDrive copy."""
     if not GH_TOKEN:
         return
-    try:
-        url = f"https://raw.githubusercontent.com/{GH_REPO}/{GH_BRANCH}/{GH_CONFIG_PATH}"
-        r = requests.get(url, headers=_gh_headers(), timeout=15)
-        if r.status_code == 200:
-            local_path = os.path.join(ONEDRIVE_ROOT, "remote_config.json")
-            with open(local_path, "w", encoding="utf-8") as f:
-                f.write(r.text)
-            print("  [GH Config] Synced remote_config.json from GitHub.")
-        else:
-            print(f"  [GH Config] Could not fetch config: {r.status_code}")
-    except Exception as e:
-        print(f"  [GH Config] Sync error: {e}")
+    url = f"https://raw.githubusercontent.com/{GH_REPO}/{GH_BRANCH}/{GH_CONFIG_PATH}"
+    r = gh_request("GET", url)
+    if r is not None and r.status_code == 200:
+        local_path = os.path.join(ONEDRIVE_ROOT, "remote_config.json")
+        with open(local_path, "w", encoding="utf-8") as f:
+            f.write(r.text)
+        log.info("Synced remote_config.json from GitHub.")
+    elif r is not None:
+        log.warning(f"Could not fetch config: {r.status_code}")
 
-def push_results_to_github(results_csv_path):
-    """Push local results.csv to GitHub."""
-    if not GH_TOKEN or not os.path.exists(results_csv_path):
+
+def reset_clear_flag_on_github():
+    """
+    Reset ClearResults:false on GitHub itself (C3).
+
+    Without this, the flag stays true on GitHub, sync_config_from_github()
+    re-pulls true every loop, and results.csv is wiped on every iteration.
+    This makes 'clear' a true one-shot.
+    """
+    if not GH_TOKEN:
         return
+    url = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_CONFIG_PATH}"
+    r = gh_request("GET", url, params={"ref": GH_BRANCH})
+    if r is None or r.status_code != 200:
+        log.warning("ClearResults reset: could not read remote config.")
+        return
+    meta = r.json()
     try:
-        with open(results_csv_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        encoded = base64.b64encode(content.encode()).decode()
-        # Get current SHA
-        url = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_RESULTS_PATH}"
-        r = requests.get(url, headers=_gh_headers(), params={"ref": GH_BRANCH}, timeout=15)
-        sha = r.json().get("sha") if r.status_code == 200 else None
+        cfg = json.loads(base64.b64decode(meta["content"]).decode())
+    except Exception as e:
+        log.warning(f"ClearResults reset: bad remote JSON: {e}")
+        return
+    if not cfg.get("ClearResults"):
+        return  # already false; nothing to do
+    cfg["ClearResults"] = False
+    body = {
+        "message": "remote_runner: reset ClearResults flag (one-shot)",
+        "content": base64.b64encode(json.dumps(cfg, indent=4).encode()).decode(),
+        "branch": GH_BRANCH,
+        "sha": meta["sha"],
+    }
+    pr = gh_request("PUT", url, json=body)
+    if pr is not None and pr.status_code in (200, 201):
+        log.info("ClearResults flag reset to false on GitHub.")
+    else:
+        log.warning("ClearResults reset: PUT failed.")
+
+def _dedup_csv_text(csv_text):
+    """
+    Deduplicate result rows by SetFile, keeping the last occurrence (H3).
+    Pure stdlib (no pandas dependency on the VPS). Preserves header + order of
+    last-seen rows.
+    """
+    try:
+        reader = list(csv.reader(io.StringIO(csv_text)))
+    except Exception:
+        return csv_text
+    if not reader:
+        return csv_text
+    header = reader[0]
+    if "SetFile" not in header:
+        return csv_text
+    key_idx = header.index("SetFile")
+    seen = {}
+    for row in reader[1:]:
+        if not row or len(row) <= key_idx:
+            continue
+        seen[row[key_idx]] = row  # last write wins
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(header)
+    for row in seen.values():
+        w.writerow(row)
+    return out.getvalue()
+
+
+def push_results_to_github(results_csv_path, retries=4):
+    """
+    Conflict-safe results push (C1, C2, H3).
+
+    On each attempt: re-fetch the current remote SHA, merge our local rows with
+    whatever is on GitHub (union, dedup by SetFile, last-wins), and PUT with the
+    fresh SHA. A 409 (someone pushed between our GET and PUT) triggers a re-fetch
+    and retry with backoff instead of silently dropping the result.
+    """
+    if not GH_TOKEN or not os.path.exists(results_csv_path):
+        return False
+
+    with open(results_csv_path, "r", encoding="utf-8") as f:
+        local_text = f.read()
+
+    url = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_RESULTS_PATH}"
+    delay = 1.5
+    for attempt in range(1, retries + 1):
+        r = gh_request("GET", url, params={"ref": GH_BRANCH})
+        sha = None
+        remote_text = ""
+        if r is not None and r.status_code == 200:
+            sha = r.json().get("sha")
+            try:
+                remote_text = base64.b64decode(r.json()["content"]).decode()
+            except Exception:
+                remote_text = ""
+
+        # Merge remote + local so we never clobber rows we didn't author.
+        if remote_text.strip():
+            merged = remote_text.rstrip("\n") + "\n"
+            # append local rows minus its header
+            local_lines = local_text.splitlines()
+            merged += "\n".join(local_lines[1:]) + "\n"
+            merged = _dedup_csv_text(merged)
+        else:
+            merged = _dedup_csv_text(local_text)
+
         body = {
             "message": f"remote_runner: update results {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC",
-            "content": encoded,
+            "content": base64.b64encode(merged.encode()).decode(),
             "branch": GH_BRANCH,
         }
         if sha:
             body["sha"] = sha
-        requests.put(url, headers=_gh_headers(), json=body, timeout=30)
-        print("  [GH Results] Pushed results.csv to GitHub.")
-    except Exception as e:
-        print(f"  [GH Results] Push error: {e}")
+
+        pr = gh_request("PUT", url, json=body)
+        if pr is not None and pr.status_code in (200, 201):
+            # Keep local file in sync with the merged truth so the next append
+            # doesn't reintroduce dropped duplicates.
+            try:
+                with open(results_csv_path, "w", encoding="utf-8", newline="") as f:
+                    f.write(merged)
+            except Exception:
+                pass
+            log.info("Pushed results.csv to GitHub.")
+            return True
+        if pr is not None and pr.status_code == 409:
+            log.warning(f"results push conflict (attempt {attempt}/{retries}) — retrying")
+            time.sleep(delay)
+            delay *= 2
+            continue
+        log.warning(f"results push failed: {pr.status_code if pr is not None else 'no response'}")
+        time.sleep(delay)
+        delay *= 2
+
+    log.error("results push: all retries exhausted — result NOT persisted to GitHub.")
+    return False
+
+
+def push_heartbeat(current_job="idle"):
+    """
+    Write a liveness beacon to GitHub (H2). Dashboard reads this to show a
+    'worker last seen' badge and detect a dead/stale runner.
+    """
+    if not GH_TOKEN:
+        return
+    url = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_HEARTBEAT_PATH}"
+    r = gh_request("GET", url, params={"ref": GH_BRANCH})
+    sha = r.json().get("sha") if (r is not None and r.status_code == 200) else None
+    beat = {
+        "version": __version__,
+        "utc": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "job": current_job,
+        "symbol": SYMBOL,
+    }
+    body = {
+        "message": "remote_runner: heartbeat",
+        "content": base64.b64encode(json.dumps(beat, indent=2).encode()).decode(),
+        "branch": GH_BRANCH,
+    }
+    if sha:
+        body["sha"] = sha
+    gh_request("PUT", url, json=body)
 
 METRIC_COLS = ["Profit", "Drawdown", "DrawdownPct", "Trades", "WinRate",
                "ProfitFactor", "ExpectedPayoff", "AvgProfitTrade", "AvgLossTrade", "MaxConsecLosses"]
@@ -169,9 +360,9 @@ def init_results_csv():
         try:
             with open(RESULTS_CSV, 'w', newline='') as f:
                 csv.writer(f).writerow(headers)
-            print("  [Init] Created results.csv with headers.")
+            log.info("Created results.csv with headers.")
         except Exception as e:
-            print(f"  [Error] Failed to init CSV: {e}")
+            log.error(f"Failed to init CSV: {e}")
 
 def load_remote_config():
     """
@@ -186,19 +377,18 @@ def load_remote_config():
             with open(config_path, "r") as f:
                 data = json.load(f)
                 
-            # Check Clear Flag
+            # Check Clear Flag (local wipe; GitHub flag reset happens in
+            # reset_clear_flag_on_github() so it's a true one-shot — C3)
             if data.get("ClearResults") is True:
-                print("  [Config] 'ClearResults' detected. Clearing results.csv...")
+                log.info("'ClearResults' detected. Clearing results.csv...")
                 if os.path.exists(RESULTS_CSV):
                     try: os.remove(RESULTS_CSV)
                     except: pass
                 init_results_csv()
-                
-                # Reset Flag immediately
                 data["ClearResults"] = False
                 with open(config_path, "w") as f_out:
                     json.dump(data, f_out, indent=4)
-                print("  [Config] results.csv cleared and flag reset.")
+                log.info("results.csv cleared.")
 
             # Only update if key exists and is not empty
             if data.get("Symbol"): SYMBOL = data["Symbol"]
@@ -215,11 +405,32 @@ def load_remote_config():
                 MQL5_PROFILES_TESTER = os.path.join(MT5_DATA_FOLDER, "MQL5", "Profiles", "Tester")
                 MT5_REPORTS_DIR = os.path.join(MT5_DATA_FOLDER, "reports")
             if data.get("EAName"): EA_NAME = data["EAName"]
-            print(f"  [Config] Loaded: {SYMBOL}, ${DEPOSIT}, {FROM_DATE} -> {FORWARD_SPLIT_DATE} -> {TO_DATE}")
-            print(f"  [Config] Terminal: {MT5_TERMINAL_PATH}")
-            
+
+            # M5: validate before we trust it. Bad dates/symbol => broken run.
+            problems = []
+            for d in (FROM_DATE, FORWARD_SPLIT_DATE, TO_DATE):
+                try:
+                    datetime.strptime(d, "%Y.%m.%d")
+                except Exception:
+                    problems.append(f"bad date '{d}'")
+            if not SYMBOL or not SYMBOL.strip():
+                problems.append("empty Symbol")
+            try:
+                if float(DEPOSIT) <= 0:
+                    problems.append(f"non-positive Deposit '{DEPOSIT}'")
+            except Exception:
+                problems.append(f"bad Deposit '{DEPOSIT}'")
+            if problems:
+                log.error(f"Invalid config, ignoring update: {', '.join(problems)}")
+                return False
+
+            log.info(f"Config loaded: {SYMBOL}, ${DEPOSIT}, {FROM_DATE} -> {FORWARD_SPLIT_DATE} -> {TO_DATE}, EA={EA_NAME}")
+            return True
+
         except Exception as e:
-            print(f"  [Warning] Failed to load remote config: {e}")
+            log.warning(f"Failed to load remote config: {e}")
+            return False
+    return False
 
 # --- CONFIGURATION (REMOTE) ---
 
@@ -346,7 +557,7 @@ def parse_html_report(report_path, prefix=""):
                      data["WinRate"] = 0.0
 
     except Exception as e:
-        print(f"  [ERROR] Parsing HTML {os.path.basename(report_path)}: {e}")
+        log.error(f"Parsing HTML {os.path.basename(report_path)}: {e}")
 
     # Prefix keys
     if prefix:
@@ -379,7 +590,7 @@ def parse_set_file(filepath):
                         continue
                     inputs[key] = val
     except Exception as e:
-        print(f"  [Warning] Failed to parse set file {os.path.basename(filepath)}: {e}")
+        log.warning(f"Failed to parse set file {os.path.basename(filepath)}: {e}")
     return inputs
 
 def detect_symbol_from_filename(filename):
@@ -425,11 +636,43 @@ Report={report_base_relative}
             conf += f"{k}={v}\n"
     return conf
 
+def run_mt5(ini_path):
+    """
+    Launch the MT5 tester with a hard timeout (H1). Returns True on clean exit,
+    False if it timed out (process killed) or failed to launch.
+    """
+    try:
+        subprocess.run([MT5_TERMINAL_PATH, f"/config:{ini_path}"],
+                       check=False, timeout=MT5_RUN_TIMEOUT_SEC)
+        return True
+    except subprocess.TimeoutExpired:
+        log.error(f"MT5 exceeded {MT5_RUN_TIMEOUT_SEC}s — killed. Job will be marked failed.")
+        # terminal64 is detached by /config; best-effort kill of stragglers.
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", "terminal64.exe"],
+                           check=False, timeout=30)
+        except Exception:
+            pass
+        return False
+    except Exception as e:
+        log.error(f"MT5 launch error: {e}")
+        return False
+
+
+def metrics_valid(metrics, prefix):
+    """
+    Reject all-zero / empty parses (M3) so a broken report never lands as a fake
+    real row. Require at least Profit and Trades to have parsed.
+    """
+    return (f"{prefix}Trades" in metrics) and (f"{prefix}Profit" in metrics)
+
+
 def run_worker():
-    print(f"--- Remote Worker (Single Test Mode) ---")
-    print(f"MT5 Terminal: {MT5_TERMINAL_PATH}")
-    print(f"MT5 Data Folder: {MT5_DATA_FOLDER}")
-    print(f"Watching: {QUEUE_DIR}")
+    _setup_logging(ONEDRIVE_ROOT)
+    log.info(f"--- Remote Worker v{__version__} (Single Test Mode) ---")
+    log.info(f"MT5 Terminal: {MT5_TERMINAL_PATH}")
+    log.info(f"MT5 Data Folder: {MT5_DATA_FOLDER}")
+    log.info(f"Watching: {QUEUE_DIR}")
 
     # Ensure local dirs exist
     for d in [QUEUE_DIR, PROCESSING_DIR, PROCESSED_DIR, RESULTS_DIR]:
@@ -437,16 +680,14 @@ def run_worker():
 
     # Ensure MT5 target dirs exist
     if not os.path.exists(MQL5_PROFILES_TESTER):
-        print(f"Warning: MT5 Local Dir not found: {MQL5_PROFILES_TESTER}")
+        log.warning(f"MT5 Local Dir not found: {MQL5_PROFILES_TESTER}")
         try: os.makedirs(MQL5_PROFILES_TESTER)
         except: pass
-    
+
     if not os.path.exists(MT5_REPORTS_DIR):
-        print(f"Creating Reports Dir: {MT5_REPORTS_DIR}")
+        log.info(f"Creating Reports Dir: {MT5_REPORTS_DIR}")
         try: os.makedirs(MT5_REPORTS_DIR)
         except: pass
-
-    # ... (omitted CSV init) ...
 
     # Initialize CSV
     init_results_csv()
@@ -454,16 +695,20 @@ def run_worker():
     while True:
         # Sync config + queue from GitHub
         sync_config_from_github()
+        load_remote_config()          # apply config (handles ClearResults locally)
+        reset_clear_flag_on_github()  # C3: make ClearResults a true one-shot
         check_github_queue(QUEUE_DIR)
 
         queue_files = glob.glob(os.path.join(QUEUE_DIR, "*.set"))
         if not queue_files:
+            push_heartbeat("idle")
             time.sleep(10)
             continue
 
         for set_file_source in queue_files:
             filename = os.path.basename(set_file_source)
-            print(f"\nProcessing {filename}...")
+            log.info(f"Processing {filename}...")
+            push_heartbeat(filename)
 
             # 0. Load Dynamic Configuration
             load_remote_config()
@@ -477,60 +722,60 @@ def run_worker():
             # 2. Copy to MT5 Data Folder (MQL5/Profiles/Tester)
             mt5_set_path = os.path.join(MQL5_PROFILES_TESTER, filename)
             shutil.copy2(processing_path_onedrive, mt5_set_path)
-            print(f"  Copied .set to: {mt5_set_path}")
+            log.info(f"Copied .set to: {mt5_set_path}")
 
             # Parse inputs from the source file
             set_inputs = parse_set_file(processing_path_onedrive)
             
+            ini_path = os.path.join(PROCESSING_DIR, "mt5.ini")
+
             # 3. RUN 1: Backtest Portion (Start -> Split)
-            print("  [Step 1/2] Running Backtest Portion...")
+            log.info("[Step 1/2] Running Backtest Portion...")
             report_bt_name = f"Report_{filename.replace('.set', '')}_BT"
-            report_bt_val = f"reports\\{report_bt_name}" # No extension, MT5 adds .htm
-            
-            ini_bt = create_ini_file(f"Profiles\\Tester\\{filename}", report_bt_val, FROM_DATE, FORWARD_SPLIT_DATE, inputs=set_inputs, symbol_override=file_symbol)
-            
-            # Write INI and Run
-            with open(os.path.join(PROCESSING_DIR, "mt5.ini"), "w") as f: f.write(ini_bt)
-            subprocess.run([MT5_TERMINAL_PATH, f"/config:{os.path.join(PROCESSING_DIR, 'mt5.ini')}"], check=False)
-            
-            # Check/Parse BT Report
+            report_bt_val = f"reports\\{report_bt_name}"  # MT5 adds .htm
+            ini_bt = create_ini_file(f"Profiles\\Tester\\{filename}", report_bt_val,
+                                     FROM_DATE, FORWARD_SPLIT_DATE,
+                                     inputs=set_inputs, symbol_override=file_symbol)
+            with open(ini_path, "w") as f: f.write(ini_bt)
+            bt_ok = run_mt5(ini_path)
+
             expected_bt = os.path.join(MT5_REPORTS_DIR, f"{report_bt_name}.htm")
             bt_metrics = {}
-            if os.path.exists(expected_bt):
-                print(f"  BT Report Found: {expected_bt}")
+            if bt_ok and os.path.exists(expected_bt):
                 bt_metrics = parse_html_report(expected_bt, prefix="BT_")
+                if not metrics_valid(bt_metrics, "BT_"):
+                    log.error(f"BT report parsed empty/zero for {filename} — marking failed.")
+                    bt_metrics = {}
             else:
-                print(f"  [Error] BT Report missing: {expected_bt}")
+                log.error(f"BT report missing or run failed: {expected_bt}")
 
             # 4. RUN 2: Forward Portion (Split -> End)
-            print("  [Step 2/2] Running Forward Portion...")
+            log.info("[Step 2/2] Running Forward Portion...")
             report_ft_name = f"Report_{filename.replace('.set', '')}_FWD"
             report_ft_val = f"reports\\{report_ft_name}"
-            
-            ini_ft = create_ini_file(f"Profiles\\Tester\\{filename}", report_ft_val, FORWARD_SPLIT_DATE, TO_DATE, inputs=set_inputs, symbol_override=file_symbol)
-            
-            # Write INI and Run
-            with open(os.path.join(PROCESSING_DIR, "mt5.ini"), "w") as f: f.write(ini_ft)
-            subprocess.run([MT5_TERMINAL_PATH, f"/config:{os.path.join(PROCESSING_DIR, 'mt5.ini')}"], check=False)
-            
-            # Check/Parse FWD Report
+            ini_ft = create_ini_file(f"Profiles\\Tester\\{filename}", report_ft_val,
+                                     FORWARD_SPLIT_DATE, TO_DATE,
+                                     inputs=set_inputs, symbol_override=file_symbol)
+            with open(ini_path, "w") as f: f.write(ini_ft)
+            ft_ok = run_mt5(ini_path)
+
             expected_ft = os.path.join(MT5_REPORTS_DIR, f"{report_ft_name}.htm")
             ft_metrics = {}
-            if os.path.exists(expected_ft):
-                print(f"  FWD Report Found: {expected_ft}")
-                # Parse as "BT_" because it looks like a backtest report, but we map it to FT output
-                raw_ft = parse_html_report(expected_ft, prefix="") 
-                # Remap keys manually to FT_
+            if ft_ok and os.path.exists(expected_ft):
+                raw_ft = parse_html_report(expected_ft, prefix="")
                 ft_metrics = {f"FT_{k}": v for k, v in raw_ft.items()}
+                if not metrics_valid(ft_metrics, "FT_"):
+                    log.error(f"FT report parsed empty/zero for {filename} — marking failed.")
+                    ft_metrics = {}
             else:
-                 print(f"  [Error] FWD Report missing: {expected_ft}")
+                log.error(f"FT report missing or run failed: {expected_ft}")
 
             # 5. Save Combined Results
-            # Extract Pass Number
             pass_match = re.search(r"Pass(\d+)", filename)
             pass_num = pass_match.group(1) if pass_match else "0"
 
-            regime_score = calculate_regime_score(bt_metrics, ft_metrics)
+            run_failed = not (metrics_valid(bt_metrics, "BT_") and metrics_valid(ft_metrics, "FT_"))
+            regime_score = "FAILED" if run_failed else calculate_regime_score(bt_metrics, ft_metrics)
 
             row = {
                 "Timestamp": datetime.now(),
@@ -541,14 +786,10 @@ def run_worker():
             row.update(bt_metrics)
             row.update(ft_metrics)
 
-            print(f"  [DEBUG] Saving Row Data: {row}") # Visual Confirmation
-
             row_list = [row.get(h, "") for h in RESULTS_HEADERS]
-            
             with open(RESULTS_CSV, 'a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(row_list)
-            print("  Combined Results Saved.")
+                csv.writer(f).writerow(row_list)
+            log.info(f"Result saved ({'FAILED' if run_failed else 'ok'}): {filename}")
 
             # Push results to GitHub so dashboard can read them
             push_results_to_github(RESULTS_CSV)
@@ -560,7 +801,7 @@ def run_worker():
                 if os.path.exists(expected_ft):
                     os.remove(expected_ft)
             except Exception as e:
-                print(f"  [Warning] Failed to delete HTML reports: {e}")
+                log.warning(f"Failed to delete HTML reports: {e}")
 
 
 
@@ -581,11 +822,16 @@ def run_worker():
             shutil.move(processing_path_onedrive, final_path)
             # Optional: Clean up MT5 side .set? Maybe keep for debugging.
 
-import traceback
-
 if __name__ == "__main__":
-    try:
-        run_worker()
-    except Exception:
-        traceback.print_exc()
-        input("Press Enter to exit...")
+    # Self-healing supervisor (H5): on crash, log the traceback and restart
+    # instead of blocking on input(). Lets the worker survive transient faults
+    # without a human at the RDP console.
+    while True:
+        try:
+            run_worker()
+        except KeyboardInterrupt:
+            log.info("Interrupted by user — exiting.")
+            break
+        except Exception:
+            log.exception("run_worker crashed — restarting in 30s")
+            time.sleep(30)
