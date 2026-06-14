@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"if ($env:TOOL_INPUT_FILE_PATH -like '*remote_runner.py') { Copy-Item $env:TOOL_INPUT_FILE_PATH 'C:\\Users\\manmi\\OneDrive\\RD_MT5_Sharing\\remote_runner.py' -Force; Write-Host '[SYNC] remote_runner.py -> OneDrive' }\""
+          }
+        ]
+      }
+    ]
+  }
+}

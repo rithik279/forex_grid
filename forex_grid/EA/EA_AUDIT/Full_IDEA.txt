@@ -1,0 +1,605 @@
+Yes. After reading through everything, I think the document we actually need is not an EA specification.
+
+We need a master operating system for the entire business.
+
+The EA is only one component.
+
+The optimization infrastructure is only one component.
+
+The real asset is:
+
+Market Regime Intelligence
+    ↓
+Strategy Manufacturing
+    ↓
+Optimization
+    ↓
+Validation
+    ↓
+Deployment
+    ↓
+Monitoring
+    ↓
+Retirement
+    ↓
+Knowledge Accumulation
+
+Looking across all the notes, PDFs, Archangel docs, Triton decisions, Antigravity infrastructure, and our conversations, here is what I think the final architecture should be.
+
+ArchangelX Strategy Manufacturing System
+Mission
+
+Build a repeatable system that can:
+
+Detect market regimes
+Generate strategy hypotheses
+Manufacture setfiles
+Validate robustness
+Deploy to prop accounts
+Retire failing strategies
+Accumulate institutional knowledge
+
+The objective is not prediction.
+
+The objective is:
+
+Consistently producing deployable strategies faster than regimes change.
+
+Core Philosophy
+Wrong Mental Model
+Find the best setfile
+Deploy forever
+Make money
+
+This is what most retail traders do.
+
+Correct Mental Model
+Market Regime
+    ↓
+Strategy Identity
+    ↓
+Parameter Set
+    ↓
+Deployment
+    ↓
+Expiration
+
+Strategies are consumables.
+
+Processes are permanent.
+
+The Five Layer Model
+
+Every strategy must pass through all five layers.
+
+Layer 1 — Regime Detection
+
+Questions:
+
+Is market trending?
+
+Is market ranging?
+
+Is volatility expanding?
+
+Is volatility compressing?
+
+Are macro risks elevated?
+
+Tools:
+
+ADX
+ATR
+EMA Slope
+Macro Calendar
+News Events
+
+Output:
+
+Regime Fingerprint
+
+Example:
+
+Gold
+
+ADX = 31
+ATR = Expansion
+EMA = Up
+
+Regime:
+Trending Bullish High Volatility
+Layer 2 — Strategy Identity
+
+Every strategy must belong to one family.
+
+No exceptions.
+
+Type 1
+
+Range Mean Reversion
+
+RSI
+BB
+Low ADX
+Type 2
+
+Defensive Mean Reversion
+
+RSI
+BB
+Strict ADX
+Wide spacing
+Type 3
+
+Trend Compatible Grid
+
+EMA
+ADX
+RSI Pullback
+Type 4
+
+Event Mode
+
+ATR Scaling
+Wide spacing
+Low aggression
+
+If you cannot classify a setfile:
+
+INVALID
+Layer 3 — Entry Logic
+
+Indicators do not predict.
+
+Indicators grant permission.
+
+RSI
+
+Timing
+
+When?
+BB
+
+Location
+
+Where?
+EMA
+
+Direction
+
+Which way?
+ADX
+
+Permission
+
+Should we even trade?
+ATR
+
+Scaling
+
+How aggressive?
+Layer 4 — Execution Engine
+
+This is Archangel/Triton.
+
+Controls:
+
+Pip Step
+Pip Step Exponent
+Lot Size
+Lot Exponent
+Max Orders
+TP
+Lock Profit
+Trailing
+
+This layer creates profit.
+
+But only if Layers 1-3 were correct.
+
+Layer 5 — Risk Governance
+
+Most important layer.
+
+Controls:
+
+Daily Stop
+
+Global Equity Stop
+
+Max Running Loss
+
+News Shutdown
+
+Session Shutdown
+
+Weekend Shutdown
+
+Portfolio Exposure Limits
+
+Purpose:
+
+Survive being wrong
+The Weekly Operating Cycle
+Monday
+
+Market Intelligence
+
+For each instrument:
+
+ATR State
+
+ADX State
+
+EMA State
+
+Event Risk
+
+Regime Label
+
+Output:
+
+Regime Dashboard
+Tuesday
+
+Hypothesis Formation
+
+Example:
+
+Gold likely remains
+bullish trend regime
+for next 3–4 weeks.
+
+Invalid if:
+ADX < 20
+or
+April swing low breaks.
+
+Output:
+
+Hypothesis Card
+Wednesday
+
+Strategy Selection
+
+Choose:
+
+Range MR
+Defensive MR
+Trend Grid
+Event Mode
+Thursday
+
+Optimization
+
+Only optimize parameters.
+
+Never optimize:
+
+Risk Framework
+
+Strategy Identity
+
+Session Rules
+
+News Rules
+
+Those remain fixed.
+
+Friday
+
+Validation
+
+Check:
+
+FT vs BT
+
+Drawdown
+
+Trade Count
+
+Stability Zone
+
+Parameter Cluster
+
+Reject fragile files.
+
+Optimization Rules
+Rule 1
+
+Profit is not first.
+
+Rank by:
+
+1. Drawdown Stability
+
+2. Trade Count
+
+3. Profit Factor
+
+4. Profit
+Rule 2
+
+Cluster Selection
+
+Never deploy:
+
+Rank #1
+
+Deploy:
+
+Center of cluster
+Rule 3
+
+Optimize Inside Strategy Identity
+
+Example:
+
+If:
+
+Range Mean Reversion
+
+Then:
+
+ADX Logic Locked
+
+EMA Logic Locked
+
+Only tune:
+
+PipStep
+TP
+LockProfit
+Spacing
+Strategy Registry
+
+Every deployment gets a card.
+
+Fields:
+
+Name
+
+Symbol
+
+Regime
+
+Hypothesis
+
+Assumption Break
+
+Parameters
+
+Deploy Date
+
+Expiry Date
+
+Status
+
+Status:
+
+ACTIVE
+
+MONITORING
+
+RETIRED
+Deployment Pipeline
+TradingView Analysis
+    ↓
+Regime Label
+    ↓
+Hypothesis
+    ↓
+Pine Validation
+    ↓
+Optimization
+    ↓
+Cluster Selection
+    ↓
+Antigravity Validation
+    ↓
+Strategy Registry
+    ↓
+Demo
+    ↓
+Live
+AI Roadmap
+
+This is where your AI engineering interests fit.
+
+Phase 1
+
+No AI.
+
+Just process.
+
+Human Regime Analysis
+Human Hypothesis
+Human Deployment
+
+Fastest path.
+
+Phase 2
+
+Structured Data Layer
+
+Use:
+
+Python
+Postgres
+Pydantic
+
+Store:
+
+Regimes
+
+Strategies
+
+Results
+
+Deployments
+
+Pydantic fits immediately.
+
+Phase 3
+
+Market Intelligence Agent
+
+Input:
+
+OHLCV
+
+Economic Calendar
+
+News
+
+Output:
+
+Regime Fingerprint
+
+Scenario Probabilities
+
+Strategy Recommendation
+Phase 4
+
+Optimization Agent
+
+Agent generates:
+
+Parameter Ranges
+
+Optimization Jobs
+
+Cluster Analysis
+
+Huge leverage.
+
+Phase 5
+
+Portfolio Intelligence
+
+Agent answers:
+
+Which strategies should be active?
+
+Which should be retired?
+
+Where is risk concentrated?
+
+Which instrument has best opportunity?
+Where RL Fits
+
+Not now.
+
+This is where I would place RL eventually:
+
+Bad RL Problem
+Buy
+
+Sell
+
+Close
+
+Too noisy.
+
+Too unstable.
+
+Too slow.
+
+Good RL Problems
+
+Years later:
+
+Strategy Allocation
+
+Capital Allocation
+
+Risk Allocation
+
+Regime Switching
+
+Deployment Decisions
+
+The RL agent isn't trading.
+
+The RL agent is managing the portfolio of strategies.
+
+That's much closer to a realistic use case.
+
+Tech Stack
+
+Today
+
+Python
+
+MT5
+
+Git
+
+Postgres
+
+Pydantic
+
+Claude/OpenAI APIs
+
+Near Future
+
+FastAPI
+
+Postgres
+
+Pydantic
+
+TradingView
+
+Antigravity
+
+Later
+
+Agent Framework
+
+Evaluation Harness
+
+Regime Intelligence Agent
+
+Portfolio Intelligence Agent
+
+Not TensorFlow.
+
+Not RL.
+
+Not complicated agent orchestration.
+
+Not yet.
+
+The Next 90-Day Goal
+
+Not:
+
+Build AGI Trader
+
+Not:
+
+Perfect Architecture
+
+Not:
+
+Fully Autonomous Hedge Fund
+
+The actual goal:
+
+Can we repeatedly:
+
+1. Label regimes
+2. Generate hypotheses
+3. Manufacture setfiles
+4. Validate them
+5. Deploy them
+6. Retire them
+
+for 90 days straight?
+
+If that works, then the AI layer becomes worth building.
+
+If that doesn't work, no amount of RL, TensorFlow, LangChain, or agents will save it.
+
+The strongest insight across all the material is that ArchangelX is not really an EA project anymore. It is becoming a regime-aware strategy manufacturing and deployment platform. The EA is simply the execution engine at the center of that factory. This synthesis is directly supported by the project overview, strategy framework, optimization framework, and operating documents you assembled.

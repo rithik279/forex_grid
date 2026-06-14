@@ -1,10 +1,12 @@
 //+------------------------------------------------------------------+
-//|                                                  Triton_v1.0.mq5  |
+//|                                          Triton_v1.1_AUDITED.mq5  |
 //|                           Regime-Aware Grid Sequencing EA        |
-//|                                          Version 1.0 — May 2026  |
+//|                       Version 1.1 (audited) — June 2026          |
 //+------------------------------------------------------------------+
 //
-// SERAPHIM — Grid-based basket mean reversion system for MT5.
+// TRITON — Grid-based basket mean reversion system for MT5.
+// Product-faithful reconstruction of ArchAngelX behavior.
+// See PRODUCT_BEHAVIOR_SPEC.md / IMPLEMENTATION_AUDIT.md / PATCH_REPORT.md.
 //
 // Sequences orders at exponentially expanding pip steps with
 // exponentially increasing lot sizes, then closes the entire basket
@@ -37,7 +39,7 @@
 
 #property copyright "Triton"
 #property link      ""
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -60,10 +62,12 @@ enum ENUM_LOCK_CHECK_MODE
    EVERY_TICK      = 2  // Every Tick
 };
 
+// Product enum order (confirmed by ArchAngelX optimizer screenshots):
+// Close all trades = 0, Complete the sequence = 1, Pause the sequence = 2
 enum ENUM_SESSION_END_ACTION
 {
-   COMPLETE_SEQUENCE  = 0, // Complete the sequence
-   CLOSE_ALL_TRADES   = 1, // Close all trades
+   CLOSE_ALL_TRADES   = 0, // Close all trades
+   COMPLETE_SEQUENCE  = 1, // Complete the sequence
    PAUSE_SEQUENCE     = 2  // Pause the sequence
 };
 
@@ -76,7 +80,8 @@ enum ENUM_RESTART_MODE
 enum ENUM_EQUITY_STOP_TYPE
 {
    EQUITY_ABSOLUTE        = 0, // Absolute Equity
-   EQUITY_RISKED_PERCENT  = 1  // Risked Percentage
+   EQUITY_RISKED_AMOUNT   = 1, // Risked Amount
+   EQUITY_RISKED_PERCENT  = 2  // Risked Percentage
 };
 
 enum ENUM_EMA_TREND_RULE
@@ -97,10 +102,12 @@ enum ENUM_BB_MODE
    BB_ONLY_EXTREME_COUNTER_TREND = 1  // Only Extreme Counter Trend
 };
 
+// Product enum order (confirmed by ArchAngelX optimizer screenshots):
+// Close all trades = 0, Complete the sequence = 1, Pause the sequence = 2
 enum ENUM_NEWS_ACTION
 {
-   NEWS_COMPLETE_SEQUENCE = 0, // Complete the sequence
-   NEWS_CLOSE_ALL         = 1, // Close all trades
+   NEWS_CLOSE_ALL         = 0, // Close all trades
+   NEWS_COMPLETE_SEQUENCE = 1, // Complete the sequence
    NEWS_PAUSE_SEQUENCE    = 2  // Pause the sequence
 };
 
@@ -128,6 +135,8 @@ input string   TradeComment              = "";             // Trade Comment
 input long     MagicNumber               = 26062023;       // Magic Number
 input bool     UseRandomEntryDelay       = false;          // Use Random Entry Delay?
 input int      RandomSeed                = 42;             // Random Seed (deterministic PRNG)
+input int      RandomEntryDelayMinSeconds = 1;             // Random Entry Delay Min Seconds
+input int      RandomEntryDelayMaxSeconds = 30;            // Random Entry Delay Max Seconds
 input int      LogLevel                  = 1;              // Log Level (0=silent 1=major 2=verbose 3=debug)
 
 //--- EA Licensing Settings
@@ -178,9 +187,9 @@ input double   MaxLotSize               = 1.0;             // Max Lot Size (0 = 
 //--- Weekend Closure Settings
 input group "═══ WEEKEND CLOSURE SETTINGS ═══"
 input bool     CloseForWeekend          = false;           // Close for Weekend
-input int      DayToClose               = 5;               // Day to Close (1=Mon..5=Fri)
+input ENUM_DAY_OF_WEEK DayToClose       = FRIDAY;          // Day to Close
 input string   TimeToClose              = "21:00";         // Time to Close
-input int      DayToRestart             = 1;               // Day to Restart (1=Mon)
+input ENUM_DAY_OF_WEEK DayToRestart     = MONDAY;          // Day to Restart
 input string   TimeToRestart            = "01:00";         // Time to Restart
 
 //--- Trading Session Settings
@@ -203,7 +212,7 @@ input double   DailyProfitTarget        = 0.0;             // Daily Profit Targe
 input double   UltimateTargetBalance    = 0.0;             // Ultimate Target Balance (0 = Off)
 input ENUM_EQUITY_STOP_TYPE GlobalEquityStopType = EQUITY_ABSOLUTE; // Global Equity Stop Type
 input double   GlobalEquityStopValue    = 0.0;             // Global Equity Stop (In $ or %, 0 = Off)
-input bool     ResetGlobalEquityStop    = false;           // Reset Global Equity Stop Daily
+input bool     ResetGlobalEquityStop    = false;           // Reset Global Equity Stop?
 input int      MinSecondsBetweenTrades  = 0;               // Min Seconds Between Trades
 
 //--- Indicators Settings — RSI
@@ -267,10 +276,16 @@ struct SequenceInfo
    datetime SequenceStartTime;
    int      LiveDelayCounter;
    double   LiveDelayAccumLots;
+   int      LiveDelayStartLevel;
    int      DepthHistory;
    bool     FirstRealTradeAfterLD;
    bool     LDMultiplierApplied;
-   int      DelayBarCounter;
+   bool     DelaySequenceActive;
+   int      DelayVirtualLevel;
+   double   DelayAnchorPrice;
+   double   DelayWorstPrice;
+   datetime DelaySequenceStartTime;
+   bool     DelaySignalIsBuy;
 
    void Reset()
    {
@@ -287,10 +302,16 @@ struct SequenceInfo
       SequenceStartTime   = 0;
       LiveDelayCounter    = 0;
       LiveDelayAccumLots  = 0.0;
+      LiveDelayStartLevel = 0;
       DepthHistory        = 0;
       FirstRealTradeAfterLD = false;
       LDMultiplierApplied   = false;
-      DelayBarCounter     = 0;
+      DelaySequenceActive = false;
+      DelayVirtualLevel = 0;
+      DelayAnchorPrice = 0.0;
+      DelayWorstPrice = 0.0;
+      DelaySequenceStartTime = 0;
+      DelaySignalIsBuy = true;
    }
 };
 
@@ -361,16 +382,29 @@ OptimizationMetrics g_metrics;
 
 datetime  g_lastBarTimeChart  = 0;
 datetime  g_lastBarTimeM1     = 0;
-datetime  g_lastEntryBarTime  = 0;    // for DelayTradeSequence
+bool      g_isNewBarChart     = false;
+bool      g_isNewBarM1        = false;
 double    g_dailyStartBalance = 0.0;
 datetime  g_dailyResetTime    = 0;
 bool      g_weekendClosed     = false;
-bool      g_equityStopped     = false;
-bool      g_lossStopped       = false;
-datetime  g_lossStopTime      = 0;
-bool      g_targetReached     = false;
+
+// Distinct hard-stop latches (never collapse — they have different reset rules)
+bool      g_lossStopped         = false;  // MaxRunningLoss     — restart per RestartEAAfterLoss
+datetime  g_lossStopTime        = 0;
+bool      g_dailyTargetStopped  = false;  // DailyProfitTarget  — auto-restart next day
+datetime  g_dailyTargetStopTime = 0;
+bool      g_ultimateStopped     = false;  // UltimateTargetBalance — permanent
+bool      g_globalEquityStopped = false;  // GlobalEquityStop   — reset only via ResetGlobalEquityStop
+
 double    g_globalEquityHigh  = 0.0;
 uint      g_randomState       = 0;
+bool      g_pendingBuyEntry   = false;
+bool      g_pendingSellEntry  = false;
+datetime  g_pendingBuyEntryTime = 0;
+datetime  g_pendingSellEntryTime = 0;
+datetime  g_lastGlobalTradeTime = 0;      // MinSecondsBetweenTrades (per EA instance)
+datetime  g_lastNewsCheckTime = 0;
+bool      g_newsActiveCache   = false;
 int       g_sequenceDurationSum = 0;
 int       g_sequenceDepthSum    = 0;
 int       g_pipMultiplier       = 1;
@@ -446,7 +480,7 @@ double NormalizeLot(double lots)
    lots = MathFloor(lots / lotStep) * lotStep;
    lots = MathMax(lots, minLot);
    lots = MathMin(lots, maxLot);
-   return NormalizeDouble(lots, 2);
+   return NormalizeDouble(lots, 8); // 8 digits: supports 0.001-step symbols
 }
 
 bool ParseTime(string timeStr, int &hour, int &minute)
@@ -640,7 +674,8 @@ bool CloseAllPositionsBothDirections()
 double GridStepDistance(int level)
 {
    if(level <= 0) return 0;
-   double rawStep = MathAbs(PipStep) * MathPow(PipStepExponent, (double)level);
+   int exponentIndex = (int)MathMax(level - 1, 0);
+   double rawStep = MathAbs(PipStep) * MathPow(PipStepExponent, (double)exponentIndex);
    if(MaxPipStep > 0 && rawStep > MaxPipStep)
       rawStep = MaxPipStep;
    // Preserve sign so ResolveDistance knows ATR mode
@@ -648,10 +683,99 @@ double GridStepDistance(int level)
    return ResolveDistance(signedStep);
 }
 
+double CurrentEntryPrice(ENUM_POSITION_TYPE posType)
+{
+   return (posType == POSITION_TYPE_BUY) ?
+          SymbolInfoDouble(_Symbol, SYMBOL_ASK) :
+          SymbolInfoDouble(_Symbol, SYMBOL_BID);
+}
+
+void StartDelayedVirtualSequence(ENUM_POSITION_TYPE posType, SequenceInfo &seq, bool signalIsBuy)
+{
+   double anchorPrice = CurrentEntryPrice(posType);
+   seq.State = STATE_BUILDING;
+   seq.Level = 1;
+   seq.TradeCount = 0;
+   seq.TotalLots = 0.0;
+   seq.WeightedAvgPrice = 0.0;
+   seq.DelaySequenceActive = true;
+   seq.DelayVirtualLevel = 1;
+   seq.DelayAnchorPrice = anchorPrice;
+   seq.DelayWorstPrice = anchorPrice;
+   seq.DelaySequenceStartTime = TimeCurrent();
+   seq.DelaySignalIsBuy = signalIsBuy;
+   seq.SequenceStartTime = TimeCurrent();
+   seq.DepthHistory = 1;
+
+   LogMajor("Seq started (DelayTradeSequence virtual): " +
+            (posType == POSITION_TYPE_BUY ? "BUY" : "SELL") +
+            " virtual lvl 1 anchor=" +
+            DoubleToString(anchorPrice, (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS)));
+}
+
+bool DelayedVirtualStepReached(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
+{
+   if(!seq.DelaySequenceActive || seq.DelayVirtualLevel <= 0) return false;
+
+   double currentPrice = CurrentEntryPrice(posType);
+   double stepDist = GridStepDistance(seq.DelayVirtualLevel);
+
+   if(posType == POSITION_TYPE_BUY)
+      return (seq.DelayWorstPrice - currentPrice) >= stepDist;
+
+   return (currentPrice - seq.DelayWorstPrice) >= stepDist;
+}
+
+void AdvanceDelayedVirtualSequence(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
+{
+   double currentPrice = CurrentEntryPrice(posType);
+   seq.DelayVirtualLevel++;
+   seq.Level = seq.DelayVirtualLevel;
+   seq.DelayWorstPrice = currentPrice;
+
+   if(seq.Level > seq.DepthHistory)
+      seq.DepthHistory = seq.Level;
+
+   LogVerbose("DelayTradeSequence virtual advance: " +
+              (posType == POSITION_TYPE_BUY ? "BUY" : "SELL") +
+              " virtual lvl=" + IntegerToString(seq.DelayVirtualLevel));
+}
+
+void ClearDelayedVirtualSequence(SequenceInfo &seq)
+{
+   seq.DelaySequenceActive = false;
+   seq.DelayVirtualLevel = 0;
+   seq.DelayAnchorPrice = 0.0;
+   seq.DelayWorstPrice = 0.0;
+   seq.DelaySequenceStartTime = 0;
+   seq.DelaySignalIsBuy = true;
+}
+
+bool StartDelayedVirtualSequenceForSignal(bool signalIsBuy)
+{
+   bool actualBuy = signalIsBuy;
+   if(ReverseSequenceDirection) actualBuy = !actualBuy;
+
+   if(actualBuy)
+   {
+      if(g_seqBuy.State != STATE_IDLE || CountPositions(POSITION_TYPE_BUY) > 0) return false;
+      if(!DirectionAllowedGlobally(POSITION_TYPE_BUY)) return false;
+      StartDelayedVirtualSequence(POSITION_TYPE_BUY, g_seqBuy, signalIsBuy);
+      return true;
+   }
+
+   if(g_seqSell.State != STATE_IDLE || CountPositions(POSITION_TYPE_SELL) > 0) return false;
+   if(!DirectionAllowedGlobally(POSITION_TYPE_SELL)) return false;
+   StartDelayedVirtualSequence(POSITION_TYPE_SELL, g_seqSell, signalIsBuy);
+   return true;
+}
+
 bool GridShouldOpenNext(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
 {
    if(seq.Level <= 0) return false;
    double worstPrice = GetWorstPrice(posType);
+   if(worstPrice == 0 && LiveDelay > 0 && seq.LiveDelayCounter > 0 && !seq.FirstRealTradeAfterLD)
+      worstPrice = seq.DelayWorstPrice;
    if(worstPrice == 0) return false;
 
    double stepDist    = GridStepDistance(seq.Level);
@@ -679,8 +803,9 @@ double ComputeBaseLot()
       if(InitialAccountBalanceThreshold <= 0) return NormalizeLot(LotSize);
       double pipVal = GetPipValue(1.0);
       if(pipVal == 0 || RiskInPips == 0) return NormalizeLot(LotSize);
-      double baseLot = (balance / InitialAccountBalanceThreshold) *
-                       ((RiskPercentForCompounding / 100.0 * balance) / (RiskInPips * pipVal));
+      // Threshold-relative risk lot × CompoundScale(balance/threshold)
+      // collapses to a SINGLE balance factor — never multiply balance twice
+      double baseLot = (RiskPercentForCompounding / 100.0 * balance) / (RiskInPips * pipVal);
       if(MaxLotSizeForCompounding > 0)
          baseLot = MathMin(baseLot, MaxLotSizeForCompounding);
       return NormalizeLot(baseLot);
@@ -702,7 +827,8 @@ double ComputeLotForLevel(int level)
 {
    double base = ComputeBaseLot();
    double lot  = base * MathPow(LotSizeExponent, (double)level);
-   if(MaxLotSize > 0) lot = MathMin(lot, MaxLotSize);
+   double cap  = UseCompounding ? MaxLotSizeForCompounding : MaxLotSize;
+   if(cap > 0) lot = MathMin(lot, cap);
    return NormalizeLot(lot);
 }
 
@@ -794,19 +920,21 @@ bool FilterADX(bool isBuy)
    if(CopyBuffer(g_indicators.hADX, 1, 0, 1, adxPlus)  != 1) return true;
    if(CopyBuffer(g_indicators.hADX, 2, 0, 1, adxMinus) != 1) return true;
 
-   if(adxMain[0] < ADXThreshold) return false;
-
+   bool trending  = (adxMain[0] >= ADXThreshold);
    bool bullTrend = (adxPlus[0] > adxMinus[0]);
    bool bearTrend = (adxMinus[0] > adxPlus[0]);
 
    if(ADXTrendRule == ADX_WITH_TREND_ONLY)
    {
+      // No trades in flat market; with-trend only when trending
+      if(!trending) return false;
       return isBuy ? bullTrend : bearTrend;
    }
-   else
-   {
-      return isBuy ? !bearTrend : !bullTrend;
-   }
+
+   // ADX_AVOID_OPPOSITE_TREND (product: "trades when the ADX is below the
+   // threshold (ranging)"; when trending, with-trend only)
+   if(!trending) return true;
+   return isBuy ? bullTrend : bearTrend;
 }
 
 bool FilterBollinger(bool isBuy)
@@ -889,68 +1017,50 @@ bool IsInSession()
       return (nowMin >= startMin || nowMin <= endMin);
 }
 
-bool ShouldCloseForWeekend()
+int MinutesOfWeek(int dayOfWeek, int hour, int minute)
 {
-   if(!CloseForWeekend) return false;
-   MqlDateTime dt;
-   TimeCurrent(dt);
-   if(dt.day_of_week != DayToClose) return false;
-   int closeH, closeM;
-   if(!ParseTime(TimeToClose, closeH, closeM)) return false;
-   int nowMin   = dt.hour * 60 + dt.min;
-   int closeMin = closeH * 60 + closeM;
-   return (nowMin >= closeMin);
+   return dayOfWeek * 1440 + hour * 60 + minute;
 }
 
-bool ShouldRestartAfterWeekend()
+// True while inside the weekend-closure window: from DayToClose/TimeToClose
+// to DayToRestart/TimeToRestart, wrapping through the weekend.
+bool InWeekendClosure()
 {
-   if(!CloseForWeekend) return true;
+   if(!CloseForWeekend) return false;
+   int closeH, closeM, restH, restM;
+   if(!ParseTime(TimeToClose,   closeH, closeM)) return false;
+   if(!ParseTime(TimeToRestart, restH,  restM))  return false;
+
    MqlDateTime dt;
    TimeCurrent(dt);
-   if(dt.day_of_week < DayToRestart) return false;
-   if(dt.day_of_week > DayToRestart) return true;
-   int restartH, restartM;
-   if(!ParseTime(TimeToRestart, restartH, restartM)) return false;
-   int nowMin     = dt.hour * 60 + dt.min;
-   int restartMin = restartH * 60 + restartM;
-   return (nowMin >= restartMin);
+   int nowMin   = MinutesOfWeek(dt.day_of_week, dt.hour, dt.min);
+   int closeMin = MinutesOfWeek((int)DayToClose,   closeH, closeM);
+   int restMin  = MinutesOfWeek((int)DayToRestart, restH,  restM);
+
+   if(closeMin == restMin) return false;
+   if(closeMin < restMin)  return (nowMin >= closeMin && nowMin < restMin);
+   return (nowMin >= closeMin || nowMin < restMin); // window wraps Sat/Sun
+}
+
+// New-bar events are computed ONCE per tick (UpdateBarFlags) so that BUY/SELL
+// and lock/trailing checks all observe the same event — a destructive
+// "first caller consumes the bar" pattern broke bar-close modes before.
+void UpdateBarFlags()
+{
+   datetime chartBar = iTime(_Symbol, PERIOD_CURRENT, 0);
+   g_isNewBarChart = (chartBar != g_lastBarTimeChart);
+   if(g_isNewBarChart) g_lastBarTimeChart = chartBar;
+
+   datetime m1Bar = iTime(_Symbol, PERIOD_M1, 0);
+   g_isNewBarM1 = (m1Bar != g_lastBarTimeM1);
+   if(g_isNewBarM1) g_lastBarTimeM1 = m1Bar;
 }
 
 bool IsBarCloseCheck(ENUM_LOCK_CHECK_MODE mode)
 {
-   if(mode == EVERY_TICK) return true;
-   if(mode == BAR_CLOSE_CHART)
-   {
-      datetime barTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-      if(barTime != g_lastBarTimeChart)
-      {
-         g_lastBarTimeChart = barTime;
-         return true;
-      }
-      return false;
-   }
-   if(mode == BAR_CLOSE_M1)
-   {
-      datetime barTime = iTime(_Symbol, PERIOD_M1, 0);
-      if(barTime != g_lastBarTimeM1)
-      {
-         g_lastBarTimeM1 = barTime;
-         return true;
-      }
-      return false;
-   }
-   return true;
-}
-
-bool IsNewBarOnChart()
-{
-   datetime barTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-   if(barTime != g_lastEntryBarTime)
-   {
-      g_lastEntryBarTime = barTime;
-      return true;
-   }
-   return false;
+   if(mode == EVERY_TICK)      return true;
+   if(mode == BAR_CLOSE_CHART) return g_isNewBarChart;
+   return g_isNewBarM1; // BAR_CLOSE_M1
 }
 
 
@@ -962,15 +1072,35 @@ bool IsHighImpactNewsNow()
 {
    if(!UseHighImpactNews) return false;
 
-   datetime now  = TimeCurrent();
-   datetime from = now - (datetime)(CloseMinutesBeforeNews * 60);
-   datetime to   = now + (datetime)(PauseMinutesAfterNews  * 60);
+   datetime now = TimeCurrent();
+
+   // Throttle: calendar queries are expensive; 30s cache is far finer than
+   // the minutes-scale news windows and remains deterministic per tick stream
+   if(g_lastNewsCheckTime != 0 && (now - g_lastNewsCheckTime) < 30)
+      return g_newsActiveCache;
+   g_lastNewsCheckTime = now;
+   g_newsActiveCache   = false;
+
+   // Block when an event falls in [now - PauseAfter, now + CloseBefore]:
+   // i.e. it is at most CloseMinutesBeforeNews ahead, or at most
+   // PauseMinutesAfterNews behind
+   datetime from = now - (datetime)(PauseMinutesAfterNews  * 60);
+   datetime to   = now + (datetime)(CloseMinutesBeforeNews * 60);
 
    MqlCalendarValue values[];
    string currency  = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_BASE);
    string currency2 = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT);
 
-   int count = CalendarValueHistory(values, from, to, NULL, NULL);
+   if(!CalendarValueHistory(values, from, to, NULL, NULL))
+   {
+      // Calendar unavailable (Strategy Tester, disabled terminal feed, or
+      // broker without calendar): fail open as "no news", but say so
+      Log(2, "News calendar query failed err=" + IntegerToString(GetLastError()) +
+          " — treating as no news");
+      return false;
+   }
+
+   int count = ArraySize(values);
    for(int i = 0; i < count; i++)
    {
       MqlCalendarEvent   event;
@@ -980,7 +1110,10 @@ bool IsHighImpactNewsNow()
       if(event.importance == CALENDAR_IMPORTANCE_HIGH)
       {
          if(country.currency == currency || country.currency == currency2)
+         {
+            g_newsActiveCache = true;
             return true;
+         }
       }
    }
    return false;
@@ -1008,7 +1141,11 @@ bool UltimateTargetReached()
 bool MaxRunningLossExceeded()
 {
    if(MaxRunningLoss <= 0) return false;
-   return (GetTotalFloatingProfit() <= -MaxRunningLoss);
+   double limit = MaxRunningLoss;
+   // Product: with compounding, Max Running Loss is per threshold → scale it
+   if(UseCompounding && InitialAccountBalanceThreshold > 0)
+      limit *= AccountInfoDouble(ACCOUNT_BALANCE) / InitialAccountBalanceThreshold;
+   return (GetTotalFloatingProfit() <= -limit);
 }
 
 bool GlobalEquityStopTriggered()
@@ -1020,6 +1157,8 @@ bool GlobalEquityStopTriggered()
    {
       case EQUITY_ABSOLUTE:
          return (equity <= GlobalEquityStopValue);
+      case EQUITY_RISKED_AMOUNT:
+         return ((balance - equity) >= GlobalEquityStopValue);
       case EQUITY_RISKED_PERCENT:
       {
          if(balance == 0) return false;
@@ -1030,80 +1169,97 @@ bool GlobalEquityStopTriggered()
    return false;
 }
 
+bool TradingHardStopped()
+{
+   return g_lossStopped || g_dailyTargetStopped || g_ultimateStopped || g_globalEquityStopped;
+}
+
+// Each stop condition latches its OWN flag — they have different reset rules:
+//   MaxRunningLoss     → restart per RestartEAAfterLoss
+//   DailyProfitTarget  → auto-restart next day at RestartNextDayAt
+//   UltimateTarget     → permanent (mission complete)
+//   GlobalEquityStop   → permanent unless ResetGlobalEquityStop
 bool EquityGuardCheck()
 {
-   if(g_equityStopped) return true;
+   if(TradingHardStopped()) return true;
 
-   bool   stopped = false;
-   string reason  = "";
+   string reason = "";
+   bool   isLossStop = false;
 
    if(DailyProfitTargetReached())
    {
-      stopped = true;
-      reason  = "Daily profit target reached";
+      reason = "Daily profit target reached";
+      g_dailyTargetStopped  = true;
+      g_dailyTargetStopTime = TimeCurrent();
       g_metrics.DailyTargetHits++;
    }
    else if(UltimateTargetReached())
    {
-      stopped = true;
-      reason  = "Ultimate target balance reached";
+      reason = "Ultimate target balance reached — permanent shutdown";
+      g_ultimateStopped = true;
    }
    else if(MaxRunningLossExceeded())
    {
-      stopped       = true;
-      reason        = "Max running loss exceeded";
-      g_lossStopped = true;
+      reason = "Max running loss exceeded";
+      g_lossStopped  = true;
       g_lossStopTime = TimeCurrent();
+      isLossStop     = true;
       g_metrics.DailyLossHits++;
    }
    else if(GlobalEquityStopTriggered())
    {
-      stopped = true;
-      reason  = "Global equity stop triggered";
+      reason = "Global equity stop triggered";
+      g_globalEquityStopped = true;
+      g_metrics.RiskStopCount++; // hard-stop disqualifier for OnTester
    }
 
-   if(stopped)
+   if(reason != "")
    {
       LogMajor("EQUITY GUARD: " + reason);
       CloseAllPositionsBothDirections();
-      g_equityStopped   = true;
-      g_seqBuy.State    = STATE_STOPPED_BY_EQUITY;
-      g_seqSell.State   = STATE_STOPPED_BY_EQUITY;
-      g_metrics.RiskStopCount++;
+      CancelAllPendingRandomEntries("equity_guard_triggered");
+      g_seqBuy.Reset();
+      g_seqSell.Reset();
+      g_seqBuy.State  = isLossStop ? STATE_STOPPED_BY_LOSS : STATE_STOPPED_BY_EQUITY;
+      g_seqSell.State = isLossStop ? STATE_STOPPED_BY_LOSS : STATE_STOPPED_BY_EQUITY;
       return true;
    }
    return false;
+}
+
+// Shared "next calendar day at HH:MM" restart test
+bool NextDayRestartReached(datetime stopTime, string restartAt)
+{
+   MqlDateTime dtNow, dtStop;
+   TimeToStruct(TimeCurrent(), dtNow);
+   TimeToStruct(stopTime, dtStop);
+   if(dtNow.year == dtStop.year && dtNow.mon == dtStop.mon && dtNow.day == dtStop.day)
+      return false;
+   int restH, restM;
+   if(!ParseTime(restartAt, restH, restM)) return false;
+   return (dtNow.hour > restH || (dtNow.hour == restH && dtNow.min >= restM));
 }
 
 bool CanRestartAfterLoss()
 {
    if(!g_lossStopped) return false;
 
-   datetime now = TimeCurrent();
-
    if(RestartEAAfterLoss == RESTART_NEXT_DAY)
-   {
-      MqlDateTime dtNow, dtStop;
-      TimeToStruct(now, dtNow);
-      TimeToStruct(g_lossStopTime, dtStop);
-      if(dtNow.day != dtStop.day || dtNow.mon != dtStop.mon || dtNow.year != dtStop.year)
-      {
-         int restH, restM;
-         if(ParseTime(RestartNextDayAt, restH, restM))
-         {
-            if(dtNow.hour > restH || (dtNow.hour == restH && dtNow.min >= restM))
-               return true;
-         }
-      }
-      return false;
-   }
+      return NextDayRestartReached(g_lossStopTime, RestartNextDayAt);
 
-   if(RestartEAAfterLoss == RESTART_AFTER_HOURS)
-   {
-      double hoursPassed = (double)(now - g_lossStopTime) / 3600.0;
-      return (hoursPassed >= RestartAfterHours);
-   }
-   return false;
+   // RESTART_AFTER_HOURS
+   double hoursPassed = (double)(TimeCurrent() - g_lossStopTime) / 3600.0;
+   return (hoursPassed >= RestartAfterHours);
+}
+
+// Release sequences out of STOPPED state once no hard stop remains latched
+void ReleaseStoppedSequences()
+{
+   if(TradingHardStopped()) return;
+   if(g_seqBuy.State == STATE_STOPPED_BY_EQUITY || g_seqBuy.State == STATE_STOPPED_BY_LOSS)
+      g_seqBuy.Reset();
+   if(g_seqSell.State == STATE_STOPPED_BY_EQUITY || g_seqSell.State == STATE_STOPPED_BY_LOSS)
+      g_seqSell.Reset();
 }
 
 void CheckDailyReset()
@@ -1118,13 +1274,21 @@ void CheckDailyReset()
    {
       g_dailyStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
       g_dailyResetTime    = dayStart;
-      g_targetReached     = false;
 
-      if(ResetGlobalEquityStop && g_equityStopped)
+      if(ResetGlobalEquityStop && g_globalEquityStopped)
       {
-         g_equityStopped = false;
+         g_globalEquityStopped = false;
          LogMajor("Global equity stop reset for new day");
+         ReleaseStoppedSequences();
       }
+   }
+
+   // Daily profit target stop auto-clears the next day at RestartNextDayAt
+   if(g_dailyTargetStopped && NextDayRestartReached(g_dailyTargetStopTime, RestartNextDayAt))
+   {
+      g_dailyTargetStopped = false;
+      LogMajor("Daily profit target stop cleared — new trading day");
+      ReleaseStoppedSequences();
    }
 }
 
@@ -1162,11 +1326,13 @@ void ApplyStopLoss(ulong ticket, ENUM_POSITION_TYPE posType)
           " err=" + IntegerToString(res.retcode));
 }
 
-bool MinTimeBetweenTradesOK(SequenceInfo &seq)
+// Prop-firm rule: minimum gap between ANY two orders of this EA instance
+// (not per direction — two directions 1s apart would still violate the rule)
+bool MinTimeBetweenTradesOK()
 {
    if(MinSecondsBetweenTrades <= 0) return true;
-   if(seq.LastTradeTime == 0) return true;
-   return ((int)(TimeCurrent() - seq.LastTradeTime) >= MinSecondsBetweenTrades);
+   if(g_lastGlobalTradeTime == 0) return true;
+   return ((int)(TimeCurrent() - g_lastGlobalTradeTime) >= MinSecondsBetweenTrades);
 }
 
 bool DirectionAllowedGlobally(ENUM_POSITION_TYPE posType)
@@ -1220,6 +1386,7 @@ ulong SendMarketOrder(ENUM_POSITION_TYPE posType, double lots, string comment)
       return 0;
    }
 
+   g_lastGlobalTradeTime = TimeCurrent();
    Log(1, "Order placed: " + comment + " deal=" + IntegerToString((int)res.deal) +
        " lots=" + DoubleToString(lots, 2));
    return res.deal;
@@ -1246,13 +1413,151 @@ void ApplyStopLossToLatest(ENUM_POSITION_TYPE posType)
 
 bool IsEntrySignalValid(bool isBuy)
 {
-   // V1 stub: UseRandomEntryDelay captured but not implemented
-   if(UseRandomEntryDelay)
-   {
-      uint rnd = RandomNext();
-      if((rnd % 100) < 30) return false;
-   }
    return AllFiltersPass(isBuy);
+}
+
+string DirectionLabel(bool isBuy)
+{
+   return isBuy ? "BUY" : "SELL";
+}
+
+int GetRandomDelaySeconds()
+{
+   if(RandomEntryDelayMinSeconds == RandomEntryDelayMaxSeconds)
+      return RandomEntryDelayMinSeconds;
+
+   int range = RandomEntryDelayMaxSeconds - RandomEntryDelayMinSeconds + 1;
+   return RandomEntryDelayMinSeconds + (int)(RandomNext() % (uint)range);
+}
+
+bool HasPendingRandomEntry(bool isBuy)
+{
+   return isBuy ? g_pendingBuyEntry : g_pendingSellEntry;
+}
+
+datetime PendingRandomEntryTime(bool isBuy)
+{
+   return isBuy ? g_pendingBuyEntryTime : g_pendingSellEntryTime;
+}
+
+void ScheduleRandomEntry(bool isBuy)
+{
+   if(HasPendingRandomEntry(isBuy)) return;
+
+   int delaySeconds = GetRandomDelaySeconds();
+   datetime executeTime = TimeCurrent() + delaySeconds;
+
+   if(isBuy)
+   {
+      g_pendingBuyEntry = true;
+      g_pendingBuyEntryTime = executeTime;
+   }
+   else
+   {
+      g_pendingSellEntry = true;
+      g_pendingSellEntryTime = executeTime;
+   }
+
+   LogMajor("Random entry delay scheduled: " + DirectionLabel(isBuy) +
+            " executes at " + TimeToString(executeTime, TIME_DATE|TIME_SECONDS) +
+            " after " + IntegerToString(delaySeconds) + " seconds");
+}
+
+void CancelPendingRandomEntry(bool isBuy, string reason)
+{
+   if(!HasPendingRandomEntry(isBuy)) return;
+
+   if(isBuy)
+   {
+      g_pendingBuyEntry = false;
+      g_pendingBuyEntryTime = 0;
+   }
+   else
+   {
+      g_pendingSellEntry = false;
+      g_pendingSellEntryTime = 0;
+   }
+
+   LogVerbose("Random entry delay cancelled: " + DirectionLabel(isBuy) +
+              " reason=" + reason);
+}
+
+void CancelAllPendingRandomEntries(string reason)
+{
+   CancelPendingRandomEntry(true, reason);
+   CancelPendingRandomEntry(false, reason);
+}
+
+bool ProcessPendingRandomEntry(bool isBuy)
+{
+   if(!HasPendingRandomEntry(isBuy)) return false;
+
+   datetime executeTime = PendingRandomEntryTime(isBuy);
+   if(TimeCurrent() < executeTime)
+   {
+      LogDebug("Random entry delay pending: " + DirectionLabel(isBuy) +
+               " executes at " + TimeToString(executeTime, TIME_DATE|TIME_SECONDS));
+      return true;
+   }
+
+   ENUM_SEQUENCE_STATE seqState = isBuy ? g_seqBuy.State : g_seqSell.State;
+   if(seqState != STATE_IDLE)
+   {
+      CancelPendingRandomEntry(isBuy, "sequence_not_idle");
+      return true;
+   }
+
+   if(!AllowNewSequence)
+   {
+      CancelPendingRandomEntry(isBuy, "new_sequences_disabled");
+      return true;
+   }
+
+   if(TradingHardStopped() || g_weekendClosed)
+   {
+      CancelPendingRandomEntry(isBuy, "risk_or_global_stop_active");
+      return true;
+   }
+
+   if(TradeCustomTimes && !IsInSession())
+   {
+      CancelPendingRandomEntry(isBuy, "outside_session");
+      return true;
+   }
+
+   if(UseHighImpactNews && IsHighImpactNewsNow())
+   {
+      CancelPendingRandomEntry(isBuy, "news_filter_active");
+      return true;
+   }
+
+   if(!IsEntrySignalValid(isBuy))
+   {
+      CancelPendingRandomEntry(isBuy, "entry_filters_no_longer_valid");
+      return true;
+   }
+
+   CancelPendingRandomEntry(isBuy, "executing");
+
+   // Product order: random entry delay FIRST, then DelayTradeSequence.
+   // The virtual sequence is anchored only now, after the delay elapsed
+   // and filters re-validated.
+   if(DelayTradeSequence > 0)
+   {
+      if(StartDelayedVirtualSequenceForSignal(isBuy))
+         LogMajor("Random delayed entry → virtual sequence started: " + DirectionLabel(isBuy));
+      else
+         LogVerbose("Random delayed entry: virtual sequence blocked: " + DirectionLabel(isBuy));
+      return true;
+   }
+
+   bool opened = OpenFirstTrade(isBuy);
+   if(opened)
+      LogMajor("Random delayed entry executed: " + DirectionLabel(isBuy));
+   else
+      LogVerbose("Random delayed entry failed to open: " + DirectionLabel(isBuy));
+
+   return true;
 }
 
 
@@ -1354,6 +1659,39 @@ bool CheckTrailingStop(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
 // MODULE: SEQUENCE MANAGER
 // =====================================================================
 
+// Single place where a finished sequence updates optimization metrics
+// (previously duplicated in three call sites, and MaxDepth was missed in two)
+void FinalizeSequenceMetrics(SequenceInfo &seq)
+{
+   g_metrics.TotalSequences++;
+   if(seq.DepthHistory > g_metrics.MaxDepth)
+      g_metrics.MaxDepth = seq.DepthHistory;
+   g_sequenceDepthSum += seq.DepthHistory;
+   if(seq.SequenceStartTime > 0)
+      g_sequenceDurationSum += (int)(TimeCurrent() - seq.SequenceStartTime);
+   g_metrics.AvgDepth    = (double)g_sequenceDepthSum / g_metrics.TotalSequences;
+   g_metrics.AvgDuration = (double)g_sequenceDurationSum / g_metrics.TotalSequences;
+}
+
+// A virtual/delayed phase (DelayTradeSequence levels, or LiveDelay
+// accumulation) holds ZERO real positions. It must never convert into real
+// exposure while new risk is blocked (news/session/weekend), so cancel it.
+void CancelFlatVirtualSequence(ENUM_POSITION_TYPE posType, SequenceInfo &seq, string reason)
+{
+   bool virtualPhase = seq.DelaySequenceActive ||
+                       (LiveDelay > 0 && seq.LiveDelayCounter > 0 && seq.TradeCount == 0);
+   if(!virtualPhase) return;
+   if(CountPositions(posType) > 0) return;
+   LogVerbose("Virtual sequence cancelled: " + reason);
+   seq.Reset();
+}
+
+void CancelFlatVirtualSequences(string reason)
+{
+   CancelFlatVirtualSequence(POSITION_TYPE_BUY,  g_seqBuy,  reason);
+   CancelFlatVirtualSequence(POSITION_TYPE_SELL, g_seqSell, reason);
+}
+
 void ReconstructSequence(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
 {
    seq.Reset();
@@ -1390,37 +1728,46 @@ void ReconstructSequence(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
 
 bool OpenFirstTradeImpl(ENUM_POSITION_TYPE posType, SequenceInfo &seq, bool actualBuy)
 {
-   if(!MinTimeBetweenTradesOK(seq)) return false;
+   int firstRealLevel = seq.DelaySequenceActive ? seq.DelayVirtualLevel : 0;
+   datetime sequenceStart = seq.DelaySequenceActive ? seq.DelaySequenceStartTime : TimeCurrent();
+   int startingDepth = seq.DelaySequenceActive ? seq.DepthHistory : 0;
 
    if(LiveDelay > 0)
    {
+      double liveDelayAnchor = CurrentEntryPrice(posType);
       seq.LiveDelayCounter   = 1;
-      seq.LiveDelayAccumLots = ComputeLotForLevel(0);
+      seq.LiveDelayAccumLots = ComputeLotForLevel(firstRealLevel);
+      seq.LiveDelayStartLevel = firstRealLevel;
       seq.State              = STATE_BUILDING;
-      seq.Level              = 1;
-      seq.SequenceStartTime  = TimeCurrent();
+      seq.Level              = firstRealLevel + 1;
+      seq.SequenceStartTime  = sequenceStart;
       seq.FirstRealTradeAfterLD = false;
-      LogMajor("Seq started (LiveDelay): " + (actualBuy ? "BUY" : "SELL") + " delay lvl 1");
+      seq.DepthHistory       = (int)MathMax(startingDepth, seq.Level);
+      ClearDelayedVirtualSequence(seq);
+      seq.DelayWorstPrice    = liveDelayAnchor;
+      LogMajor("Seq started (LiveDelay): " + (actualBuy ? "BUY" : "SELL") +
+               " delay lvl " + IntegerToString(firstRealLevel + 1));
       return true;
    }
 
-   double lot     = ComputeLotForLevel(0);
-   string comment = TradeComment + (actualBuy ? "_B" : "_S") + "_L0";
+   if(!MinTimeBetweenTradesOK()) return false;
+
+   double lot     = ComputeLotForLevel(firstRealLevel);
+   string comment = TradeComment + (actualBuy ? "_B" : "_S") + "_L" + IntegerToString(firstRealLevel);
    ulong  ticket  = SendMarketOrder(posType, lot, comment);
    if(ticket == 0) return false;
 
-   Sleep(100);
    ApplyStopLossToLatest(posType);
 
    seq.State            = STATE_BUILDING;
-   seq.Level            = 1;
+   seq.Level            = firstRealLevel + 1;
    seq.TradeCount       = 1;
    seq.WeightedAvgPrice = ComputeWeightedAverage(posType);
    seq.TotalLots        = lot;
    seq.LastTradeTime    = TimeCurrent();
-   seq.SequenceStartTime = TimeCurrent();
-   seq.DepthHistory     = 1;
-   seq.DelayBarCounter  = 0;
+   seq.SequenceStartTime = sequenceStart;
+   seq.DepthHistory     = (int)MathMax(startingDepth, seq.Level);
+   ClearDelayedVirtualSequence(seq);
 
    LogMajor("New seq: " + (actualBuy ? "BUY" : "SELL") + " lots=" + DoubleToString(lot, 2));
    return true;
@@ -1447,22 +1794,28 @@ bool OpenFirstTrade(bool isBuy)
 bool OpenGridTrade(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
 {
    if(seq.State != STATE_BUILDING) return false;
-   if(seq.Level >= MaxOrdersPerDirection) return false;
-   if(!MinTimeBetweenTradesOK(seq)) return false;
 
    bool isBuy = (posType == POSITION_TYPE_BUY);
 
-   // LiveDelay accumulation phase
+   // LiveDelay accumulation phase — virtual: no order is placed, so neither
+   // MaxOrders (counts real orders) nor MinSecondsBetweenTrades applies here
    if(LiveDelay > 0 && seq.LiveDelayCounter < LiveDelay)
    {
       double lot = ComputeLotForLevel(seq.Level);
       seq.LiveDelayAccumLots += lot;
       seq.LiveDelayCounter++;
       seq.Level++;
+      seq.DelayWorstPrice = CurrentEntryPrice(posType);
+      if(seq.Level > seq.DepthHistory) seq.DepthHistory = seq.Level;
       LogVerbose("LD accumulate lvl=" + IntegerToString(seq.Level) +
                  " accum=" + DoubleToString(seq.LiveDelayAccumLots, 2));
       return true;
    }
+
+   // From here on real orders are placed.
+   // MaxOrders bounds REAL open positions (virtual levels are not orders)
+   if(CountPositions(posType) >= MaxOrdersPerDirection) return false;
+   if(!MinTimeBetweenTradesOK()) return false;
 
    // LiveDelay burst point
    if(LiveDelay > 0 && seq.LiveDelayCounter == LiveDelay && !seq.FirstRealTradeAfterLD)
@@ -1475,17 +1828,17 @@ bool OpenGridTrade(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
          string comment   = TradeComment + (isBuy ? "_B" : "_S") + "_LD_combined";
          ulong  ticket    = SendMarketOrder(posType, totalLots, comment);
          if(ticket == 0) return false;
-         Sleep(100);
          ApplyStopLossToLatest(posType);
       }
       else
       {
-         for(int lvl = 0; lvl <= seq.Level; lvl++)
+         for(int lvl = seq.LiveDelayStartLevel; lvl <= seq.Level; lvl++)
          {
+            if(CountPositions(posType) >= MaxOrdersPerDirection) break;
             double lvlLot  = ComputeLotForLevel(lvl);
             string comment = TradeComment + (isBuy ? "_B" : "_S") + "_L" + IntegerToString(lvl);
             ulong  ticket  = SendMarketOrder(posType, lvlLot, comment);
-            if(ticket > 0) { Sleep(100); ApplyStopLossToLatest(posType); }
+            if(ticket > 0) { ApplyStopLossToLatest(posType); }
          }
       }
 
@@ -1495,6 +1848,7 @@ bool OpenGridTrade(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
       seq.TotalLots        = GetTotalLots(posType);
       seq.LastTradeTime    = TimeCurrent();
       seq.Level++;
+      seq.DelayWorstPrice  = 0.0;
       LogMajor("LD burst: " + (isBuy ? "BUY" : "SELL") + " trades=" + IntegerToString(seq.TradeCount));
       return true;
    }
@@ -1512,7 +1866,6 @@ bool OpenGridTrade(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
       string comment = TradeComment + (isBuy ? "_B" : "_S") + "_L" + IntegerToString(seq.Level);
       ulong  ticket  = SendMarketOrder(posType, lot, comment);
       if(ticket == 0) return false;
-      Sleep(100);
       ApplyStopLossToLatest(posType);
       seq.LDMultiplierApplied  = true;
       seq.FirstRealTradeAfterLD = false;
@@ -1530,7 +1883,6 @@ bool OpenGridTrade(ENUM_POSITION_TYPE posType, SequenceInfo &seq)
    string comment = TradeComment + (isBuy ? "_B" : "_S") + "_L" + IntegerToString(seq.Level);
    ulong  ticket  = SendMarketOrder(posType, lot, comment);
    if(ticket == 0) return false;
-   Sleep(100);
    ApplyStopLossToLatest(posType);
 
    seq.TradeCount       = CountPositions(posType);
@@ -1554,17 +1906,7 @@ void CloseSequence(ENUM_POSITION_TYPE posType, SequenceInfo &seq, string reason)
 
    CloseAllPositions(posType);
 
-   g_metrics.TotalSequences++;
-   if(seq.DepthHistory > g_metrics.MaxDepth)
-      g_metrics.MaxDepth = seq.DepthHistory;
-   g_sequenceDepthSum += seq.DepthHistory;
-   if(seq.SequenceStartTime > 0)
-      g_sequenceDurationSum += (int)(TimeCurrent() - seq.SequenceStartTime);
-   if(g_metrics.TotalSequences > 0)
-   {
-      g_metrics.AvgDepth    = (double)g_sequenceDepthSum / g_metrics.TotalSequences;
-      g_metrics.AvgDuration = (double)g_sequenceDurationSum / g_metrics.TotalSequences;
-   }
+   FinalizeSequenceMetrics(seq);
 
    double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
@@ -1583,49 +1925,125 @@ void ProcessSequenceImpl(ENUM_POSITION_TYPE posType, SequenceInfo &seq, bool isB
 {
    int actualCount = CountPositions(posType);
 
+   if(seq.State != STATE_IDLE && HasPendingRandomEntry(isBuyDirection))
+      CancelPendingRandomEntry(isBuyDirection, "sequence_no_longer_idle");
+
    // === IDLE ===
    if(seq.State == STATE_IDLE)
    {
-      if(!AllowNewSequence) return;
+      if(!AllowNewSequence)
+      {
+         CancelPendingRandomEntry(isBuyDirection, "new_sequences_disabled");
+         return;
+      }
       if(actualCount > 0)
       {
+         CancelPendingRandomEntry(isBuyDirection, "sequence_opened_elsewhere");
          ReconstructSequence(posType, seq);
          return;
       }
-      if(TradeDirection == LONG_ONLY  && !isBuyDirection) return;
-      if(TradeDirection == SHORT_ONLY && isBuyDirection)  return;
-
-      // DelayTradeSequence: require N bars between new sequences
-      if(DelayTradeSequence > 0)
+      if(TradeDirection == LONG_ONLY  && !isBuyDirection)
       {
-         if(!IsNewBarOnChart()) return;
-         seq.DelayBarCounter++;
-         if(seq.DelayBarCounter < DelayTradeSequence) return;
-         seq.DelayBarCounter = 0;
+         CancelPendingRandomEntry(isBuyDirection, "direction_disabled");
+         return;
+      }
+      if(TradeDirection == SHORT_ONLY && isBuyDirection)
+      {
+         CancelPendingRandomEntry(isBuyDirection, "direction_disabled");
+         return;
+      }
+
+      if(UseRandomEntryDelay)
+      {
+         if(HasPendingRandomEntry(isBuyDirection))
+         {
+            ProcessPendingRandomEntry(isBuyDirection);
+            return;
+         }
+
+         // Random delay always runs FIRST; ProcessPendingRandomEntry routes
+         // to the DelayTradeSequence virtual path after the delay elapses
+         if(IsEntrySignalValid(isBuyDirection))
+         {
+            LogVerbose("Random entry signal detected: " + DirectionLabel(isBuyDirection));
+            ScheduleRandomEntry(isBuyDirection);
+         }
+         return;
       }
 
       if(IsEntrySignalValid(isBuyDirection))
+      {
+         if(DelayTradeSequence > 0)
+         {
+            StartDelayedVirtualSequenceForSignal(isBuyDirection);
+            return;
+         }
+
          OpenFirstTrade(isBuyDirection);
+      }
       return;
    }
 
    // === BUILDING ===
    if(seq.State == STATE_BUILDING)
    {
+      if(seq.DelaySequenceActive)
+      {
+         if(!AllowNewSequence)
+         {
+            LogVerbose("DelayTradeSequence cancelled: new_sequences_disabled");
+            seq.Reset();
+            return;
+         }
+
+         if(actualCount > 0)
+         {
+            ClearDelayedVirtualSequence(seq);
+            ReconstructSequence(posType, seq);
+            return;
+         }
+
+         if(!DelayedVirtualStepReached(posType, seq))
+            return;
+
+         if(seq.DelayVirtualLevel < DelayTradeSequence)
+         {
+            AdvanceDelayedVirtualSequence(posType, seq);
+            return;
+         }
+
+         // Product: before the first REAL trade only the DoubleCheck EMA/ADX
+         // inputs are re-validated. RSI/BB are NOT re-checked — with
+         // DoubleCheck flags false, the first real trade may open against
+         // the original filters (documented product behavior).
+         if(!DoubleCheckFilters(seq.DelaySignalIsBuy))
+         {
+            LogVerbose("DelayTradeSequence cancelled: double_check_filters_failed");
+            seq.Reset();
+            return;
+         }
+
+         if(CountPositions(posType) >= MaxOrdersPerDirection || !DirectionAllowedGlobally(posType))
+         {
+            LogVerbose("DelayTradeSequence cancelled: direction_or_exposure_blocked");
+            seq.Reset();
+            return;
+         }
+
+         bool actualBuy = (posType == POSITION_TYPE_BUY);
+         if(OpenFirstTradeImpl(posType, seq, actualBuy))
+            LogMajor("DelayTradeSequence completed: first real " +
+                     (actualBuy ? "BUY" : "SELL") +
+                     " at lvl " + IntegerToString(seq.Level));
+         return;
+      }
+
       // All positions closed externally (SL hit etc.)
       if(actualCount == 0 && seq.TradeCount > 0 &&
          (LiveDelay == 0 || seq.LiveDelayCounter >= LiveDelay))
       {
          LogMajor("Seq cleared externally: " + (isBuyDirection ? "BUY" : "SELL"));
-         g_metrics.TotalSequences++;
-         g_sequenceDepthSum += seq.DepthHistory;
-         if(seq.SequenceStartTime > 0)
-            g_sequenceDurationSum += (int)(TimeCurrent() - seq.SequenceStartTime);
-         if(g_metrics.TotalSequences > 0)
-         {
-            g_metrics.AvgDepth    = (double)g_sequenceDepthSum / g_metrics.TotalSequences;
-            g_metrics.AvgDuration = (double)g_sequenceDurationSum / g_metrics.TotalSequences;
-         }
+         FinalizeSequenceMetrics(seq);
          seq.Reset();
          return;
       }
@@ -1650,8 +2068,8 @@ void ProcessSequenceImpl(ENUM_POSITION_TYPE posType, SequenceInfo &seq, bool isB
          if(CheckTrailingStop(posType, seq)) { CloseSequence(posType, seq, "TrailingStop"); return; }
       }
 
-      // Grid expansion
-      if(GridShouldOpenNext(posType, seq) && seq.Level < MaxOrdersPerDirection)
+      // Grid expansion (MaxOrders enforced on real position count inside)
+      if(GridShouldOpenNext(posType, seq))
          OpenGridTrade(posType, seq);
       return;
    }
@@ -1673,13 +2091,14 @@ void ProcessSequenceImpl(ENUM_POSITION_TYPE posType, SequenceInfo &seq, bool isB
    }
 
    // === PAUSED (session/news) ===
+   // Product says "EA turns off but keeps trades open"; exits (TP / armed
+   // trailing) are still honored as a safety bias — documented AMBIGUOUS.
    if(seq.State == STATE_PAUSED_BY_SESSION || seq.State == STATE_PAUSED_BY_NEWS)
    {
       if(actualCount == 0) { seq.Reset(); return; }
       if(CheckSequenceTP(posType, seq)) { CloseSequence(posType, seq, "TakeProfit(paused)"); return; }
-      if(seq.LockTriggered)
+      if(seq.LockTriggered && IsBarCloseCheck(TrailingCheckMode))
       {
-         CheckLockProfit(posType, seq);
          if(CheckTrailingStop(posType, seq)) { CloseSequence(posType, seq, "TrailingStop(paused)"); return; }
       }
       return;
@@ -1709,6 +2128,30 @@ int OnInit()
       return INIT_PARAMETERS_INCORRECT;
    }
 
+   if(RandomEntryDelayMinSeconds < 0)
+   {
+      Print("ERROR: RandomEntryDelayMinSeconds must be >= 0");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+
+   if(RandomEntryDelayMaxSeconds < RandomEntryDelayMinSeconds)
+   {
+      Print("ERROR: RandomEntryDelayMaxSeconds must be >= RandomEntryDelayMinSeconds");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+
+   if(DelayTradeSequence < 0)
+   {
+      Print("ERROR: DelayTradeSequence must be >= 0");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+
+   if(LiveDelay < 0)
+   {
+      Print("ERROR: LiveDelay must be >= 0");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+
    int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
    g_pipMultiplier = (digits == 3 || digits == 5) ? 10 : 1;
 
@@ -1734,16 +2177,27 @@ int OnInit()
    ReconstructSequence(POSITION_TYPE_BUY,  g_seqBuy);
    ReconstructSequence(POSITION_TYPE_SELL, g_seqSell);
 
-   g_weekendClosed    = false;
-   g_equityStopped    = false;
-   g_lossStopped      = false;
-   g_targetReached    = false;
-   g_lastBarTimeChart = 0;
-   g_lastBarTimeM1    = 0;
-   g_lastEntryBarTime = 0;
+   g_weekendClosed       = false;
+   g_lossStopped         = false;
+   g_lossStopTime        = 0;
+   g_dailyTargetStopped  = false;
+   g_dailyTargetStopTime = 0;
+   g_ultimateStopped     = false;
+   g_globalEquityStopped = false;
+   g_lastBarTimeChart    = 0;
+   g_lastBarTimeM1       = 0;
+   g_isNewBarChart       = false;
+   g_isNewBarM1          = false;
+   g_pendingBuyEntry     = false;
+   g_pendingSellEntry    = false;
+   g_pendingBuyEntryTime = 0;
+   g_pendingSellEntryTime = 0;
+   g_lastGlobalTradeTime = 0;
+   g_lastNewsCheckTime   = 0;
+   g_newsActiveCache     = false;
 
-   LogMajor("Triton v1.0 initialized: " + _Symbol +
-            " magic=" + IntegerToString((int)MagicNumber) +
+   LogMajor("Triton v1.1 initialized: " + _Symbol +
+            " magic=" + (string)MagicNumber +
             " pipMult=" + IntegerToString(g_pipMultiplier));
 
    return INIT_SUCCEEDED;
@@ -1758,43 +2212,48 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-   // 0. Daily reset
+   // 0. New-bar flags (single non-destructive computation per tick)
+   UpdateBarFlags();
+
+   // 1. Daily reset — clears daily-target stop / optional equity-stop reset
    CheckDailyReset();
 
-   // 1. Equity guard — highest priority
-   if(EquityGuardCheck()) return;
-
-   // 1b. Restart after loss stop
-   if(g_lossStopped || g_equityStopped)
+   // 2. Restart after MaxRunningLoss stop. MUST run before the guard's
+   //    latched-stop early return, otherwise restart is unreachable.
+   if(g_lossStopped && CanRestartAfterLoss())
    {
-      if(g_lossStopped && CanRestartAfterLoss())
-      {
-         g_lossStopped   = false;
-         g_equityStopped = false;
-         g_seqBuy.State  = STATE_IDLE;
-         g_seqSell.State = STATE_IDLE;
-         LogMajor("Restarting after loss stop");
-      }
-      else return;
+      g_lossStopped = false;
+      ReleaseStoppedSequences();
+      LogMajor("Restarting after loss stop");
    }
 
-   // 2. Weekend close
+   // 3. Equity guard — highest priority
+   if(EquityGuardCheck())
+   {
+      CancelAllPendingRandomEntries("equity_guard_active");
+      return;
+   }
+
+   // 4. Weekend close window
    if(CloseForWeekend)
    {
-      if(ShouldCloseForWeekend() && !g_weekendClosed)
+      if(InWeekendClosure())
       {
-         LogMajor("Weekend close triggered");
-         CloseAllPositionsBothDirections();
-         g_seqBuy.Reset();
-         g_seqSell.Reset();
-         g_weekendClosed = true;
+         if(!g_weekendClosed)
+         {
+            LogMajor("Weekend close triggered");
+            CloseAllPositionsBothDirections();
+            g_seqBuy.Reset();
+            g_seqSell.Reset();
+            CancelAllPendingRandomEntries("weekend_close");
+            g_weekendClosed = true;
+         }
          return;
       }
       if(g_weekendClosed)
       {
-         if(ShouldRestartAfterWeekend())
-         { g_weekendClosed = false; LogMajor("Weekend restart"); }
-         else return;
+         g_weekendClosed = false;
+         LogMajor("Weekend restart");
       }
    }
 
@@ -1810,19 +2269,28 @@ void OnTick()
                {
                   LogMajor("News: close all");
                   CloseAllPositionsBothDirections();
+                  CancelAllPendingRandomEntries("news_close_all");
                   g_seqBuy.Reset();  g_seqBuy.State  = STATE_PAUSED_BY_NEWS;
                   g_seqSell.Reset(); g_seqSell.State = STATE_PAUSED_BY_NEWS;
                }
                return;
 
             case NEWS_PAUSE_SEQUENCE:
+               CancelAllPendingRandomEntries("news_pause_sequence");
+               CancelFlatVirtualSequences("news_pause_sequence");
                if(g_seqBuy.State  == STATE_IDLE) g_seqBuy.State  = STATE_PAUSED_BY_NEWS;
                if(g_seqSell.State == STATE_IDLE) g_seqSell.State = STATE_PAUSED_BY_NEWS;
+               if(g_seqBuy.State  == STATE_BUILDING) g_seqBuy.State  = STATE_PAUSED_BY_NEWS;
+               if(g_seqSell.State == STATE_BUILDING) g_seqSell.State = STATE_PAUSED_BY_NEWS;
                ProcessSequence(true);
                ProcessSequence(false);
                return;
 
-            default: // NEWS_COMPLETE_SEQUENCE — manage exits only, no new entries
+            default: // NEWS_COMPLETE_SEQUENCE — manage open baskets, no NEW risk
+               CancelAllPendingRandomEntries("news_blocks_new_entries");
+               // Virtual sequences hold zero positions — they must not turn
+               // into real exposure during the news window
+               CancelFlatVirtualSequences("news_blocks_new_entries");
                if(g_seqBuy.State  == STATE_IDLE) g_seqBuy.State  = STATE_PAUSED_BY_NEWS;
                if(g_seqSell.State == STATE_IDLE) g_seqSell.State = STATE_PAUSED_BY_NEWS;
                if(g_seqBuy.State  == STATE_BUILDING || g_seqBuy.State  == STATE_LOCKED) ProcessSequence(true);
@@ -1851,16 +2319,20 @@ void OnTick()
                {
                   LogMajor("Session end: close all");
                   CloseAllPositions(POSITION_TYPE_BUY);
+                  CancelPendingRandomEntry(true, "session_close_all");
                   g_seqBuy.Reset(); g_seqBuy.State = STATE_PAUSED_BY_SESSION;
                }
                if(g_seqSell.State != STATE_PAUSED_BY_SESSION)
                {
                   CloseAllPositions(POSITION_TYPE_SELL);
+                  CancelPendingRandomEntry(false, "session_close_all");
                   g_seqSell.Reset(); g_seqSell.State = STATE_PAUSED_BY_SESSION;
                }
                return;
 
             case PAUSE_SEQUENCE:
+               CancelAllPendingRandomEntries("session_pause_sequence");
+               CancelFlatVirtualSequences("session_pause_sequence");
                if(g_seqBuy.State  == STATE_BUILDING) g_seqBuy.State  = STATE_PAUSED_BY_SESSION;
                if(g_seqSell.State == STATE_BUILDING) g_seqSell.State = STATE_PAUSED_BY_SESSION;
                if(g_seqBuy.State  == STATE_IDLE)     g_seqBuy.State  = STATE_PAUSED_BY_SESSION;
@@ -1869,7 +2341,11 @@ void OnTick()
                if(g_seqSell.State == STATE_LOCKED) ProcessSequence(false);
                return;
 
-            default: // COMPLETE_SEQUENCE — manage exits, block new
+            default: // COMPLETE_SEQUENCE — manage open baskets, block new risk
+               CancelAllPendingRandomEntries("session_blocks_new_entries");
+               // Virtual sequences hold zero positions — they must not turn
+               // into real exposure outside the session
+               CancelFlatVirtualSequences("session_blocks_new_entries");
                if(g_seqBuy.State  == STATE_BUILDING || g_seqBuy.State  == STATE_LOCKED) ProcessSequence(true);
                if(g_seqSell.State == STATE_BUILDING || g_seqSell.State == STATE_LOCKED) ProcessSequence(false);
                if(g_seqBuy.State  == STATE_IDLE) g_seqBuy.State  = STATE_PAUSED_BY_SESSION;
@@ -1900,45 +2376,34 @@ void OnTick()
 void OnTrade()
 {
    // Sync sequence states when positions close externally (SL hits etc.)
+   // TradeCount > 0 guard: virtual phases (DelayTradeSequence levels,
+   // LiveDelay accumulation) hold zero positions BY DESIGN — without the
+   // guard any trade event (even opposite direction) wiped their state.
    int buyCount  = CountPositions(POSITION_TYPE_BUY);
    int sellCount = CountPositions(POSITION_TYPE_SELL);
 
    if(g_seqBuy.State == STATE_BUILDING || g_seqBuy.State == STATE_LOCKED)
    {
-      if(buyCount == 0)
+      if(buyCount == 0 && g_seqBuy.TradeCount > 0)
       {
          LogMajor("BUY seq closed externally");
-         g_metrics.TotalSequences++;
-         g_sequenceDepthSum += g_seqBuy.DepthHistory;
-         if(g_seqBuy.SequenceStartTime > 0)
-            g_sequenceDurationSum += (int)(TimeCurrent() - g_seqBuy.SequenceStartTime);
-         if(g_metrics.TotalSequences > 0)
-         {
-            g_metrics.AvgDepth    = (double)g_sequenceDepthSum / g_metrics.TotalSequences;
-            g_metrics.AvgDuration = (double)g_sequenceDurationSum / g_metrics.TotalSequences;
-         }
+         FinalizeSequenceMetrics(g_seqBuy);
          g_seqBuy.Reset();
       }
-      else g_seqBuy.TradeCount = buyCount;
+      else if(buyCount > 0)
+         g_seqBuy.TradeCount = buyCount;
    }
 
    if(g_seqSell.State == STATE_BUILDING || g_seqSell.State == STATE_LOCKED)
    {
-      if(sellCount == 0)
+      if(sellCount == 0 && g_seqSell.TradeCount > 0)
       {
          LogMajor("SELL seq closed externally");
-         g_metrics.TotalSequences++;
-         g_sequenceDepthSum += g_seqSell.DepthHistory;
-         if(g_seqSell.SequenceStartTime > 0)
-            g_sequenceDurationSum += (int)(TimeCurrent() - g_seqSell.SequenceStartTime);
-         if(g_metrics.TotalSequences > 0)
-         {
-            g_metrics.AvgDepth    = (double)g_sequenceDepthSum / g_metrics.TotalSequences;
-            g_metrics.AvgDuration = (double)g_sequenceDurationSum / g_metrics.TotalSequences;
-         }
+         FinalizeSequenceMetrics(g_seqSell);
          g_seqSell.Reset();
       }
-      else g_seqSell.TradeCount = sellCount;
+      else if(sellCount > 0)
+         g_seqSell.TradeCount = sellCount;
    }
 }
 

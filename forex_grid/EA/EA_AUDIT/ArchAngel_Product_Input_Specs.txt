@@ -1,0 +1,413 @@
+Allow New Sequence
+If TRUE, the EA will trade as normal, opening and closing sequences when valid.
+If FALSE, the EA will stop trading once the first sequence has closed.
+
+Strategy Description (Comments about strategy you are using)
+This is where you can add a description for the strategy you're using.Useful to use as a reminder when running multiple setfiles.
+
+Trade Comment
+Adding text here will simply add a comment of your choice to each trade. For example, you could enter the name you have called your strategy (PAIR-NAME TREND).
+
+Magic Number (Optional)
+This is how the EA identifies what trades are open and how to manage them. It's also the bit brokers/prop firms see in the trade log so it's important to change this so it's unique to you. Using your account number is ideal.
+
+NOTE: Don't change this whilst trades are running, it won't then know how to manage open trades.
+
+Use Random Entry Delay?
+If TRUE, a random delay will be added before the trade is executed. This can help with making the account look unique.
+If set to FALSE, the EA will instantly execute a trade once valid.
+
+Use ATR for pips
+If TRUE, all pip values will be used as ATR multiplier, else the values will be treated as pips
+
+ATR Period
+Period for the ATR indicator calculation. You can read more about ATR on google. Set the period according to your strategy need
+
+Pip Step
+This is the distance between each trade in a sequence. If set to 10, the pip step gap between each trade will be 10 pips.
+
+Pip Step Exponent
+Pip step exponent is used to determine the size of price increments between trades. It represents the exponent to which the pip step is raised. For example, a pip step exponent of 2 would square the pip step value, resulting in larger price increments, while a value of 1 would keep the pip step unchanged.
+
+Examples shown below;
+
+Pip step = 10
+Pip step multiplier = 1.5
+
+In this scenario, the distance between each trade will increase by 50%.
+
+1st trade = 10 pips
+2nd trade = 15 pips
+3rd trade = 22.5 pips
+
+Pip step = 10
+Pip step multiplier = 1
+
+In this scenario, the distance between each trade will be unchanged and stay at the pip step value entered.
+
+1st trade = 10 pips
+2nd trade = 10 pips
+3rd trade = 10 pips
+
+Max Pip Step (0 = No limit)
+This allows you to control if you want a maximum pip step rule to be followed when trading.
+For example, if we enter 30, trades will not open more than 30 pips apart. If this input is reached, subsequent trades will all open at the input entered.
+
+Delay Trade Sequence
+Delay trade sequence simply prevents trades from being opened at the start of the sequence.
+For example, If we set it to 3, the EA will ignore the first 3 trades in the sequence. It will place the first trade where the fourth trade is meant to be entered.
+
+1st trade = Trade delayed
+2nd trade = Trade delayed
+3rd trade = Trade delayed
+4th trade = Trade executed (this would be your first LIVE trade placed)
+
+If set to 0, the EA will work as normal and trade with no delay, Opening a trade when valid. This is useful when using RSI to enable us to take advantage of potential RSI divergence - for a better entry, less drawdown and more profits (because we can trade it more aggressively).
+
+Live Delay
+Live delay is similar to delay trade sequence, both delay trades from being opened. The difference with live delay is the EA will execute all the live delay trades together once we have reached the end of live delay trades inputted.
+Example shown below: Live Delay = 3
+
+1st trade = Trade delayed
+2nd trade = Trade delayed
+3rd trade = Trade delayed
+4th trade = The forth trade will be executed, along with all of the live delay trades.
+
+In this example once we reach the 4th trade level we will execute all 4 trades at the same time.
+
+Lot Multiplier for 1st Trade after LD (1 = Off)
+This controls the lot size of the trade placed after the combined live delay trade.
+
+For example:
+Lot size = 1.00
+Lot size exponent = 1.00
+Live delay = 3
+LD 2nd Trade Lots Multiplier = 2
+
+1st real trade = 3 lot
+2nd real trade = 2 lot
+3rd real trade = 1 lot
+
+This input will only affect the trade AFTER the combined live delay trades have been placed.
+
+Combine Live Delay Trades
+This function will combine all of the Live Delay Trades into one combined trade.
+
+Trade Direction
+Trading direction allows you to choose whether you want the EA to trade BOTH long and short, just short or just long.
+
+Max Orders (Per Direction)
+This controls the max amount of orders allowed in one direction. If set to 10, the EA will not allow more than 10 buys or 10 sells to be open at any one time. This is useful when managing lot exposure. However, this will stop the EA opening the positions it needs to bring the TP closer.
+
+Reverse Sequence Direction?
+The reverse feature will simply reverse everything the EA does, for example if the EA is meant to open a BUY, it will enter a SELL. If the EA is meant to open a SELL, it will enter a BUY. If TRUE, the EA will reverse the direction of trades. If FALSE, the EA will trade as normal.
+
+TakeProfit (Pips)
+If '100' is inputted, the EA will place a take profit of 100 pips. When multiple trades are open the TP is based on the sequence of trades (from the mid-point entry to the TP) not the individual trades.
+If Use ATR is true, you would be using a multiplier of ATR to control the take profit.
+
+StopLoss (Pips)
+If '100' is inputted, the EA will place a 100 pip stop loss. Inputting a stop loss will mean each individual trade the EA places will have its own stop loss.
+If Use ATR is true, you would be using a multiplier of ATR to control the stop loss.
+
+Lock Profit Min Trades
+This is how we control if we want to set a minimum trade amount before the lock profit can be triggered. If we input 2, it simply means we need a minimum of 2 open trades before the lock profit can be triggered.
+
+Lock Profit (Pips)
+Lock profit is how the trailing stop loss is triggered. Once a trade or a sequence of trades are open, the EA will identify where the break-even level is,the lock profit will then be placed from that level.
+If you enter '30' into the lock profit input, the EA will trigger the trailing stop loss once 30 pips have been achieved from the breakeven level. (Like the TP - if there's more than one trade the lock profit will manage the sequence of trades altogether).
+If Use ATR is true, you would be using a multiplier of ATR to control the lock profit.
+
+Lock Profit - When to check
+Here you have three options in the drop down menu for how you want the lock profit to be triggered.
+
+On Bar Close (Chart Timeframe)
+This means the EA will trigger the lock profit once the candle stick has closed based on the chart timeframe the EA is attached to.
+
+On Bar Close (M1 Timeframe)
+This means the EA will trigger the lock profit once the M1 candle stick has closed.
+
+Everytick
+This means the EA will trigger the lock profit as soon as the criteria/price is met.
+
+Trailing Stoploss (Pips)
+Once the Lock profit has been placed, the Trailing stop loss will then be triggered.
+
+For example:
+trailing stop loss = 10 pips Once the lock profit is triggered, the trailing stop loss will be placed 10 pips below or above the lock profit (depending whether your in buys or sells.) If price continues to move into profit once the trailing stop loss has been triggered, it will move with price, locking in more profit. When in a sequence of trades, they are managed collectively.
+
+If Use ATR is true, you would be using a multiplier of ATR to control the trailing stop loss.
+
+Trailing Stoploss - When to check
+Here you have three options in the drop down menu for how you want the trailing stop loss to be triggered.
+
+On Bar Close (Chart Timeframe)
+This means the EA will trigger the trailing stop loss once the candlestick has closed based on the chart timeframe the EA is attached to.
+
+On Bar Close (M1 Timeframe)
+This means the EA will trigger the trailing stop loss once the M1 candlestick has closed.
+
+Everytick
+This means the EA will trigger the trailing stop loss as soon as the criteria/price is met.
+
+Allow Same (Pair & Direction) Trades?
+If this is set to true it can limit your exposure on the same pair and direction when running multiple sets on the same pair. For example, if you have GBPUSD sells on 1 set and another set tries to open a sell and this is set to true - the new sequence will be blocked from opening to reduce your exposure on that pair and direction (longs would still open).
+
+Use Compounding?
+This will enable or disable the usage of compounding lotsize. Compound LotSize means that LotSize, MaxLots and Max Running Loss will be per initial account balance threshold.
+
+Initial Account Balance Threshold
+This is the input which defines all the aspects of compounding reletively,
+Lets say if the value here is 100k then it means the rest of the values will be following the componding account balance threshold
+
+Risk Percentage for Compounding
+This parameter is used to calculate the optimal lotsize required intially at every sequence.
+
+Risk in Pips
+This parameter is also used to calculate the optimal lotsize required intially at every sequence.
+
+Max Lot Size for Compounding
+This is the max lotsize threshold for compouding strategy!
+
+Use Compounding?
+This will enable or disable the usage of compounding lotsize. Compound LotSize means that LotSize, MaxLots and Max Running Loss will be per initial account balance threshold.
+
+Initial Account Balance Threshold
+This is the input which defines all the aspects of compounding reletively,
+Lets say if the value here is 100k then it means the rest of the values will be following the componding account balance threshold
+
+Risk Percentage for Compounding
+This parameter is used to calculate the optimal lotsize required intially at every sequence.
+
+Risk in Pips
+This parameter is also used to calculate the optimal lotsize required intially at every sequence.
+
+Max Lot Size for Compounding
+This is the max lotsize threshold for compouding strategy!
+
+Lot Size
+This is where you input your starting lot size.
+
+Risk % (0 = Off)
+This input enables you to risk a % of your account. Usually used on single trade strategy. A stop loss must be entered as well as the risk % input to allow the EA to calculate the lot size needed to risk the inputted risk %.
+
+Lot Size Exponent
+This controls whether you want the lot size to stay the same or increase with every additional trade that opens in a sequence.
+
+For example:
+
+Lot Size = 0.10
+Lot Size Exponent (LSE) = 1.2
+
+The first trade that opens will be 0.10, the lot size will then increase for every trade by 20%. 0.10, 0.12, 0.14, 0.17 etc.
+
+If set to 1.00, lot size will not increase. If set to 2.0 every trade will double in size.
+This is normally a very high-risk approach. However, that's what our daily stop loss in our equity setting is for to manage your risk. The benefits of a higher LE are that trades will be faster to close, because of the increased 'weight' to the last position. The pullback needed will be smaller.
+Running a low LE is slower and safer but can take longer to close a sequence of trades.
+
+Max Lot Size (0 = No Limit)
+This allows you to limit the maximum lot size the EA can place.
+
+For example if you input 5,
+The EA won't place a trade above 5 lot size.
+
+Lot size = 2 lot
+Lot size exponent = 2
+
+Trade one- 2 lot
+Trade two- 4 lot
+Trade three- 5 lot
+Trade four- 5 lot And so on…
+
+No matter the lot size or lot exponent inputted,once the max lot size is reached, the EA will continue placing trades at the max lot size.
+
+Close for Weekend
+If set to TRUE, the EA will automatically close all open positions and disable trading at given time and day inputted below.
+
+Day to Close
+This controls the DAY you want the EA to automatically turn off and close all open positions.
+
+Time to Close
+This controls the TIME you want the EA to automatically turn off and close all open positions.
+
+Day to Restart
+This controls the DAY you want the EA to automatically turn on.
+
+Time to Restart
+This controls the TIME you want the EA to automatically turn on.
+
+Trade Custom Times
+This allows you to trade the EA within a custom trading session of your choice.
+
+Trading Session (Monday)
+Here is where you enter the custom session you want the EA to trade within.
+For example, if you enter 08:00-15:00 the EA Will start at 08:00 and finish at 15:00.
+Times are based on the broker Server Time - visible in the Market Watch section).
+
+Note: If 0 is entered, the EA will not trade on that day.
+
+Trading Session (Tuesday)
+Here is where you enter the custom session you want the EA to trade within.
+For example, if you enter 08:00-15:00 the EA Will start at 08:00 and finish at 15:00.
+Times are based on the broker Server Time - visible in the Market Watch section).
+
+Note: If 0 is entered, the EA will not trade on that day.
+
+Trading Session (Wednesday)
+Here is where you enter the custom session you want the EA to trade within.
+For example, if you enter 08:00-15:00 the EA Will start at 08:00 and finish at 15:00.
+Times are based on the broker Server Time - visible in the Market Watch section).
+
+Note: If 0 is entered, the EA will not trade on that day.
+
+Trading Session (Thursday)
+Here is where you enter the custom session you want the EA to trade within.
+For example, if you enter 08:00-15:00 the EA Will start at 08:00 and finish at 15:00.
+Times are based on the broker Server Time - visible in the Market Watch section).
+
+Note: If 0 is entered, the EA will not trade on that day.
+
+Trading Session (Friday)
+Here is where you enter the custom session you want the EA to trade within.
+For example, if you enter 08:00-15:00 the EA Will start at 08:00 and finish at 15:00.
+Times are based on the broker Server Time - visible in the Market Watch section).
+
+Note: If 0 is entered, the EA will not trade on that day.
+
+Action at the end of Session
+This is how you control how you want open positions to be handled once the custom session time set above finishes.
+
+Close all trades- Once the custom session has come to an end, the EA will be disabled and all open positions will be closed.
+
+Wait for Sequence to close- Once the custom session has come to an end, the EA will continue trading as normal until the open positions have closed. After they have closed, the EA will turn off.
+
+Pause open trade sequence- Once the custom session has come to an end, the EA will turn off but keep and trades open.
+
+Max Running Loss ($)
+This is where you input your max running loss based on OPEN positions.
+
+Restart EA After Loss
+Here you have two options based on how you'd like the EA to restart if you hit your Max Running Loss (In currency)
+
+Restart next day - The EA will automatically restart the next day at 01:00 if you hit your max running loss.
+
+Restart In Hours - The EA will automatically restart based on the amount of hours inputted in the Restart In Hoursinput below. For example if you enter 3, the EA will automatically restart 3 hours after you hit your max daily loss.
+
+Restart Next Day At
+This is where you input the time you want the EA to automatically restart IF you use the Restart Next Day input above.
+
+Restart After Hours
+This is where you input the amount of hours you want the EA to automatically restart IF you use the Restart In Hours input above.
+
+Daily Profit Target ($) (0 = Off)
+If you want to set a daily profit target, simply enter the desired profit target here. If hit, the EA will be disabled and all trades will be closed. The EA will then automatically restart the next day at specified time.
+
+Ultimate Target Balance (0 = Off)
+Ultimate Target balance is similar to the above daily profit target. The main difference being that once the desired profit target has been reached, the EA will NOT restart. All open trades will be closed and the EA will be disabled.
+This feature works across your account no matter how many pairs you're running, different magic numbers, everything will shut down.
+
+Global Equity Stop Type
+In the Drop down menu we have 3 options, three different ways to control how you want the equity stop to be handled
+
+Absolute Equity Stop (e.g 96000)
+This simply means if you have a 100k account and you input 96000, the EA will stop trading once the equity of you account reaches 96000
+
+Risked Amount (e.g 4000)
+This simply means if you have a 100k account and you input 4000, the EA will stop trading once the equity of you account reaches 96000
+
+Risked Percentage (e.g 4%)
+This simply means if you have a 100k account and you input 4%, the EA will stop trading once the equity of you account reaches 96000
+
+Global Equity Stop (In $ or %, 0 = Off)
+If you have a 100k account and you want all trades to close if your equity falls by 4% you would simply enter 96000 in this box, In order to restart click tools and global variables - clear the logs and the EA can run again
+
+Reset global equity stop?
+If true, this will reset all the equity limits to zero and EA will start operating as normal
+
+Min Seconds Between Trades
+This simply allows you to input a minimum opening time between each trade placed. This is helpful on some prop firms who enforce min trade opening between trades. For example, if you're trading with a prop firm who enforces a minimum gap of 1 minute between trades, simply enter 60 in this input.
+
+Use RSI?
+This is where you turn the RSI criteria on or off.
+
+RSI Timeframe
+Select what timeframe you want the RSI to be based on.
+
+RSI Period
+Select what RSI period you want the RSI to be based off. The period is based on the number of bars in the calculation.
+
+RSI Overbought Level
+Here is where you input the RSI level for when you want a trade to open.
+There is NO input for the BUY limit, it simply mirrors what you input for the SELL level.
+For example: If you input 80 for the SELL level, the BUY level will be automatically set to 20. If you input 55 for the SELL level, the BUY level will be automatically set to 45.
+
+Use EMA?
+This is where you turn the EMA criteria on or off.
+
+EMA Timeframe
+This is where you select the timeframe you want the EMA to be based off.Example: If you select m30, the EMA will be based on the m30 timeframe.
+
+EMA Period (Fast - Mid - Slow)
+This is where you select the combination of EMA periods you want to use.
+Example: If you were to select (4-8-60) this means you'll have three EMA's of which price will need to close above or below to allow a sequence criteria to be met.
+
+EMA Trend Rule
+Trade with trend only: If this option is selected, trades will only open when there is a clear up trend or down trend aligned with the EMA settings you have set.
+Avoid Opposite Trend (Both Buy & Sell Allowed In Flat Market): If this option is selected and there is no clear trend, buys and sells will also open when triggered. When a clear trend then starts, the EA will then only trade with the trend.
+
+Double Check EMA for first Real Trade
+This option is here for when your using trade delay.
+If set to TRUE, the EA will double check the EMA criteria before opening the first REAL trade. If set to FALSE, the EMA will only be checked for the first trade So this means your first REAL trade could open against the EMA set.
+
+Use ADX?
+This allows you to turn the ADX feature on or off.
+
+ADX Timeframe
+This is where we can select the timeframe the ADX is based off.
+
+ADX Period
+This is the number of candles within the ADX values.
+
+ADX Threshold
+This value will help determine the strength of a trend. Usually less than 25/30 means no trend and anything above that means there's a trend in the market
+
+ADX Trend Rule
+Trade with trend only (no trades in flat market) - This will look for trades with the impulse move of the trend with the ADX level above the threshold level set.
+
+Avoid opposite trend (both buy & sell allowed in flat marekt) - this will trade when the ADX is below the threshold (ranging) set and if this changes will trade with the trend overall depending upon what other positions are open.
+
+Double Check ADX for first Real Trade
+This applies when using a DELAY. If TRUE, the EA will double check if the ADX criteria is valid before a REAL trade is opened, If false, the ADX criteria will NOT be checked before a REAL trade is opened.
+
+Use Bollinger Bands?
+If true the indicator will be the part of strategy else it won't be.
+
+Bollinger Bands Mode
+'Avoid Extreme' or 'Only Extreme Counter Trend' are the options. Pair Trend Trading with 'Avoid Extreme' to prevent buying to high into an uptrend for example. Using 'Only Extreme Counter Trend' with Against Trend Trading will work well.
+
+Bollinger Bands Timeframe
+The timeframe for the Bollinger Band Indicator - we suggest M30 or H1.
+
+Bollinger Bands Period
+The amount of candles within the BB indicator - we suggest this does not require optimising.
+
+Bollinger Bands Deviation
+1.5-2 would be normal for this - again this is something that does not requires further optimisation in our opinion.
+
+Use High Impact News Filter?
+This allows you to turn the news filter on or off. If set to TRUE, the EA will automatically stop before news and restart after news based on the times set below. If set to FALSE, the EA will continue trading as normal throughout the news.
+
+News Trades Action
+Here we have two options. Close ALL trades and disable EA or Manage open trade sequence.
+
+NOTE: These options only matter if you have the news filter set to TRUE.
+
+Manage open trade sequence: The EA will continue to manage the open trade sequences like normal throughout the news.
+Close ALL trades and disable EA: If this option is selected, any open trades will be forced closed 1 hour before the news event, the EA will then continue trading again 4 hours after.
+
+Close Trade (X)Amount of time before news
+Here is where you set the number of hours you want the EA to stop before a high impact news event.
+
+Pause EA (X)Amount of time after news
+Here is where you set the number of hours you want the EA to restart after a high impact news event.
+

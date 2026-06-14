@@ -1,0 +1,52 @@
+# EA AUDIT TASK
+
+This folder contains the full context for reconstructing and repairing a source-owned MQL5 EA called Triton, intended to faithfully recreate ArchAngelX product behavior.
+
+## File priority
+
+Use the files in this priority order:
+
+1. ArchAngel_Product_Input_Specs.txt
+   - Highest-priority product behavior source.
+   - Defines intended behavior for each input setting.
+
+2. Docs/
+   - Supporting official product docs, screenshots, and project documentation.
+   - Use screenshots to confirm input labels, defaults, enum order, and setting groups.
+
+3. Triton_v1.1_CURRENT.mq5
+   - Current source implementation.
+   - This is the file to audit and patch.
+
+4. ArchAngelX_Rebuilt_OLD.mq5
+   - Older rebuild/reference source.
+   - Use only as secondary implementation reference.
+   - Do not treat it as more authoritative than product docs.
+
+5. Full_IDEA.txt
+   - High-level task framing and reconstruction plan.
+
+## Goal
+
+Audit Triton_v1.1_CURRENT.mq5 against the product documentation and fix the EA so it faithfully implements the product settings.
+
+This is a product-faithful reconstruction task, not a generic refactor.
+
+## Deliverables
+
+Return:
+
+1. Updated Triton .mq5 file.
+2. PRODUCT_BEHAVIOR_SPEC.md
+3. IMPLEMENTATION_AUDIT.md
+4. PATCH_REPORT.md
+5. TEST_PLAN.md
+
+## Rules
+
+- Do not code before completing the audit matrix.
+- Product documentation beats current source code when behavior conflicts.
+- Preserve input names and ordering unless there is a documented reason not to.
+- Do not make cosmetic rewrites.
+- Every code change must map to a product behavior or bug.
+- Must compile in MetaEditor with zero errors and zero warnings.
